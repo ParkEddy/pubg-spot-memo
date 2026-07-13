@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PUBG 스팟 메모 & 랭크 분석 v4</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<!-- Firebase (공유 저장용) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.5/firebase-app-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.5/firebase-database-compat.min.js"></script>
+
+<!-- =====================================================================
+  ★★★ 공유 저장 (나무위키처럼 누구나 저장하면 모두에게 반영) 설정법 ★★★
+
+  이 설정을 하지 않으면 "로컬 모드"로 작동합니다 (내 브라우저에만 저장).
+  공유 모드를 켜려면 무료 Firebase 프로젝트를 만들어 아래 FIREBASE_CONFIG를
+  채우면 됩니다. 5분이면 끝!
+
+  1. https://console.firebase.google.com 접속 → 구글 로그인
+  2. [프로젝트 추가] → 이름 아무거나 (예: pubg-spot) → 애널리틱스 꺼도 됨 → 생성
+  3. 왼쪽 메뉴 [빌드] → [Realtime Database] → [데이터베이스 만들기]
+     → 위치 아무거나(싱가포르 추천) → "테스트 모드로 시작" 선택 → 사용 설정
+     ※ 테스트 모드는 30일 후 잠기니, [규칙] 탭에서 아래로 바꿔두면 계속 열림:
+        { "rules": { ".read": true, ".write": true } }
+     (누구나 읽기/쓰기 가능 = 나무위키 방식. 아는 사람끼리만 링크 공유 추천)
+  4. 프로젝트 개요 옆 ⚙️ → [프로젝트 설정] → 아래 [내 앱] → 웹앱(</>) 추가
+     → 앱 등록하면 나오는 firebaseConfig 값들을 아래에 복사해 붙여넣기
+  5. 이 파일을 저장하고 GitHub Pages / Netlify 등에 올리면
+     접속하는 모든 사람이 같은 스팟/차량 데이터를 실시간으로 공유합니다.
+===================================================================== -->
+<script>
+const FIREBASE_CONFIG = {
+  apiKey: "여기에_붙여넣기",
+  authDomain: "여기에_붙여넣기",
+  databaseURL: "여기에_붙여넣기",   // ★ Realtime Database URL (https://xxx.firebaseio.com 형태)
+  projectId: "여기에_붙여넣기",
+  storageBucket: "여기에_붙여넣기",
+  messagingSenderId: "여기에_붙여넣기",
+  appId: "여기에_붙여넣기"
+};
+</script>
+
+<style>
+  :root {
+    --bg:#121212; --bg-panel:#1c1c1e; --bg-card:#242426;
+    --border:#333336; --text:#eaeaea; --text-dim:#9a9a9e;
+    --accent:#f39c12; --danger:#e74c3c;
+    --vehicle:#00bcd4; --route:#ff5722;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; overflow:hidden; }
+  body {
+    font-family:'Segoe UI','Malgun Gothic','맑은 고딕',sans-serif;
+    background:var(--bg); color:var(--text); display:flex;
+  }
+
+  /* ===== 맵 선택 시작 화면 ===== */
+  #mapSelectOverlay {
+    position:fixed; inset:0; background:var(--bg); z-index:5000;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:28px; transition:opacity .35s;
+  }
+  #mapSelectOverlay.hidden { opacity:0; pointer-events:none; }
+  #mapSelectOverlay h1 {
+    font-size:30px; letter-spacing:2px; color:var(--accent);
+    text-shadow:0 0 30px rgba(243,156,18,.35);
+  }
+  #mapSelectOverlay .sub { font-size:14px; color:var(--text-dim); margin-top:-16px; }
+  .map-select-grid {
+    display:grid; grid-template-columns:repeat(4, 150px); gap:14px;
+    justify-content:center;
+  }
+  @media (max-width:700px) { .map-select-grid { grid-template-columns:repeat(2, 150px); } }
+  .map-select-card {
+    background:var(--bg-card); border:1.5px solid var(--border);
+    border-radius:12px; padding:22px 10px; text-align:center; cursor:pointer;
+    transition:border-color .15s, transform .12s, background .15s;
+    font-family:inherit; color:var(--text);
+  }
+  .map-select-card:hover {
+    border-color:var(--accent); transform:translateY(-3px);
+    background:rgba(243,156,18,.08);
+  }
+  .map-select-card .mname { font-size:17px; font-weight:800; }
+  .map-select-card .msize { font-size:11.5px; color:var(--text-dim); margin-top:5px; }
+  .map-select-card .cached { font-size:10.5px; color:#2ecc71; margin-top:3px; height:13px; }
+  #selectDl { display:none; text-align:center; width:340px; }
+  #selectDl .t { font-size:13px; color:var(--accent); margin-bottom:8px; }
+  #selectDl .bar { height:6px; background:var(--bg-card); border-radius:3px; overflow:hidden; }
+  #selectDl .fill { height:100%; width:0%; background:var(--accent); transition:width .2s; }
+  #syncBadgeSelect { font-size:11.5px; margin-top:-14px; }
+  .sync-on { color:#2ecc71; } .sync-off { color:var(--text-dim); }
+
+  /* ===== 사이드바 ===== */
+  #sidebar {
+    width:320px; min-width:320px; height:100%;
+    background:var(--bg-panel); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; z-index:1000;
+  }
+  #sidebar header { padding:14px 16px 12px; border-bottom:1px solid var(--border); }
+  #sidebar header h1 {
+    font-size:16px; letter-spacing:1px; color:var(--accent);
+    text-transform:uppercase; display:flex; align-items:center; gap:8px;
+  }
+  #sidebar header h1::before { content:"🎯"; font-size:17px; }
+  #sidebar header .subrow {
+    display:flex; justify-content:space-between; align-items:center; margin-top:5px;
+  }
+  #currentMapName { font-size:13px; color:var(--text); font-weight:700; }
+  #syncBadge { font-size:10.5px; }
+  .panel-section { padding:11px 16px; border-bottom:1px solid var(--border); }
+  .btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    border:none; border-radius:6px; padding:8px 12px; font-size:12.5px;
+    font-weight:600; cursor:pointer; transition:filter .15s; font-family:inherit;
+  }
+  .btn:hover { filter:brightness(1.15); }
+  .btn-accent { background:var(--accent); color:#1a1a1a; width:100%; }
+  .btn-danger-outline { background:transparent; color:var(--danger); border:1px solid var(--danger); width:100%; margin-top:6px; }
+  .btn-danger-outline:hover { background:rgba(231,76,60,.12); }
+
+  #listWrap { flex:1; overflow-y:auto; padding:10px 12px 16px; }
+  #listWrap::-webkit-scrollbar { width:8px; }
+  #listWrap::-webkit-scrollbar-thumb { background:#3a3a3d; border-radius:4px; }
+  .list-title {
+    font-size:11px; color:var(--text-dim); padding:8px 4px 6px;
+    text-transform:uppercase; letter-spacing:.5px;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .spot-card {
+    background:var(--bg-card); border:1px solid var(--border);
+    border-left:4px solid var(--accent); border-radius:8px;
+    padding:9px 11px; margin-bottom:7px; cursor:pointer;
+    transition:background .15s, transform .1s;
+  }
+  .spot-card:hover { background:#2c2c2f; transform:translateX(2px); }
+  .card-top { display:flex; align-items:center; gap:8px; }
+  .grade-badge {
+    width:25px; height:25px; min-width:25px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:12.5px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);
+  }
+  .spot-name { font-size:13.5px; font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .spot-memo {
+    font-size:11.5px; color:var(--text-dim); margin-top:5px; line-height:1.45;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden; white-space:pre-line;
+  }
+  .del-spot-btn {
+    background:transparent; border:none; color:var(--text-dim);
+    font-size:14px; cursor:pointer; padding:2px 4px; border-radius:4px; line-height:1;
+  }
+  .del-spot-btn:hover { color:var(--danger); background:rgba(231,76,60,.12); }
+  #emptyMsg { text-align:center; color:var(--text-dim); font-size:12px; padding:24px 10px; line-height:1.7; }
+
+  /* ===== 지도 ===== */
+  #mapArea { flex:1; position:relative; height:100%; }
+  #map { width:100%; height:100%; background:#0d0d0d; }
+  .leaflet-container { background:#0d0d0d; }
+  .leaflet-control-zoom a { background:var(--bg-card)!important; color:var(--text)!important; border-color:var(--border)!important; }
+  .leaflet-control-zoom a:hover { background:#333!important; }
+  .leaflet-control-attribution { display:none; }
+
+  #toolbar {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    z-index:900; display:flex; gap:5px;
+    background:rgba(20,20,22,.92); border:1px solid var(--border);
+    border-radius:10px; padding:6px; box-shadow:0 4px 16px rgba(0,0,0,.5);
+    flex-wrap:wrap; justify-content:center;
+  }
+  .mode-btn {
+    background:transparent; border:1px solid transparent; color:var(--text-dim);
+    border-radius:7px; padding:7px 11px; font-size:12.5px; font-weight:600;
+    cursor:pointer; font-family:inherit; white-space:nowrap;
+    transition:background .12s, color .12s, border-color .12s;
+  }
+  .mode-btn:hover { color:var(--text); background:rgba(255,255,255,.06); }
+  .mode-btn.active { color:var(--accent); border-color:var(--accent); background:rgba(243,156,18,.12); }
+  .mode-btn.action { color:var(--text); }
+  .toolbar-sep { width:1px; background:var(--border); margin:2px 2px; }
+  #modeHint {
+    position:absolute; top:62px; left:50%; transform:translateX(-50%);
+    z-index:900; background:rgba(20,20,22,.85); border:1px solid var(--border);
+    color:var(--text-dim); font-size:12px; padding:6px 14px; border-radius:8px;
+    pointer-events:none; display:none; white-space:nowrap;
+  }
+
+  .grade-pin {
+    display:flex; align-items:center; justify-content:center;
+    width:32px; height:32px; border-radius:50%;
+    font-weight:800; font-size:15px; color:#fff;
+    border:2.5px solid rgba(255,255,255,.85);
+    box-shadow:0 2px 8px rgba(0,0,0,.6); text-shadow:0 1px 2px rgba(0,0,0,.6);
+    cursor:pointer; transition:transform .1s;
+  }
+  .grade-pin:hover { transform:scale(1.18); }
+  .vehicle-pin {
+    display:flex; align-items:center; justify-content:center;
+    width:28px; height:28px; border-radius:6px; font-size:15px;
+    background:var(--vehicle); border:2px solid rgba(255,255,255,.85);
+    box-shadow:0 2px 8px rgba(0,0,0,.6); cursor:grab; transition:transform .1s;
+  }
+  .vehicle-pin:hover { transform:scale(1.18); }
+  .jump-pin {
+    display:flex; align-items:center; justify-content:center;
+    width:30px; height:30px; border-radius:50%; font-size:16px;
+    background:var(--route); border:2px solid #fff; box-shadow:0 2px 8px rgba(0,0,0,.6);
+  }
+  .circle-handle {
+    width:16px; height:16px; border-radius:50%;
+    background:#fff; border:3px solid var(--accent);
+    box-shadow:0 2px 6px rgba(0,0,0,.6); cursor:grab;
+  }
+  .circle-edge-handle {
+    width:14px; height:14px; border-radius:50%;
+    background:var(--accent); border:2px solid #fff;
+    box-shadow:0 2px 6px rgba(0,0,0,.6); cursor:ew-resize;
+  }
+
+  .leaflet-tooltip.spot-tooltip {
+    background:rgba(20,20,22,.96); border:1px solid var(--accent);
+    border-radius:8px; color:var(--text); padding:10px 12px;
+    box-shadow:0 4px 16px rgba(0,0,0,.6); max-width:260px; white-space:normal;
+  }
+  .leaflet-tooltip.spot-tooltip::before { display:none; }
+  .leaflet-tooltip.vehicle-tooltip { border-color:var(--vehicle); }
+  .tt-head { display:flex; align-items:center; gap:7px; margin-bottom:5px; }
+  .tt-grade {
+    width:22px; height:22px; min-width:22px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:12px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);
+  }
+  .tt-name { font-weight:700; font-size:13.5px; }
+  .tt-memo { font-size:12px; color:#c8c8cc; line-height:1.5; white-space:pre-line; }
+
+  #routePanel {
+    position:absolute; bottom:16px; right:16px; z-index:900;
+    background:rgba(20,20,22,.95); border:1px solid var(--route);
+    border-radius:10px; padding:12px 14px; width:340px; max-width:calc(100vw - 370px);
+    box-shadow:0 4px 20px rgba(0,0,0,.6); display:none;
+  }
+  #routePanel h3 { font-size:13px; color:var(--route); margin-bottom:8px; }
+  .strategy-row { display:flex; gap:5px; margin-bottom:10px; }
+  .strategy-btn {
+    flex:1; background:var(--bg-card); border:1px solid var(--border);
+    color:var(--text-dim); border-radius:6px; padding:6px 2px;
+    font-size:11px; cursor:pointer; text-align:center; font-family:inherit;
+  }
+  .strategy-btn.selected { border-color:var(--route); color:var(--route); font-weight:700; }
+  .route-item {
+    background:var(--bg-card); border:1px solid var(--border); border-radius:7px;
+    padding:8px 10px; margin-bottom:6px; cursor:pointer; font-size:12px; line-height:1.55;
+    transition:border-color .12s;
+  }
+  .route-item:hover { border-color:var(--route); }
+  .route-item.selected { border-color:var(--route); background:rgba(255,87,34,.08); }
+  .route-item .rank { color:var(--route); font-weight:800; }
+  .route-item .risk-high { color:#e74c3c; }
+  .route-item .risk-mid { color:#f1c40f; }
+  .route-item .risk-low { color:#2ecc71; }
+  .route-item .detail { color:var(--text-dim); font-size:11px; }
+  #routePanel .close-route {
+    position:absolute; top:8px; right:10px; background:none; border:none;
+    color:var(--text-dim); cursor:pointer; font-size:14px;
+  }
+  #routeNote { font-size:10.5px; color:var(--text-dim); margin-top:4px; line-height:1.5; }
+
+  #modalBackdrop {
+    position:fixed; inset:0; background:rgba(0,0,0,.6);
+    display:none; align-items:center; justify-content:center; z-index:2000;
+  }
+  #modalBackdrop.open { display:flex; }
+  #modal {
+    background:var(--bg-panel); border:1px solid var(--border); border-radius:12px;
+    width:360px; max-width:calc(100vw - 40px); padding:20px;
+    box-shadow:0 10px 40px rgba(0,0,0,.7);
+  }
+  #modal h2 { font-size:16px; margin-bottom:16px; color:var(--accent); }
+  .field { margin-bottom:14px; }
+  .field label { display:block; font-size:11.5px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.5px; }
+  .grade-select { display:flex; gap:6px; }
+  .grade-opt {
+    flex:1; padding:8px 0; border-radius:6px; border:2px solid transparent;
+    font-weight:800; font-size:14px; color:#fff; cursor:pointer; text-align:center;
+    opacity:.45; transition:opacity .12s, transform .12s, border-color .12s;
+    text-shadow:0 1px 2px rgba(0,0,0,.5);
+  }
+  .grade-opt.selected { opacity:1; transform:scale(1.08); border-color:#fff; }
+  #spotNameInput, #spotMemoInput {
+    width:100%; background:var(--bg-card); border:1px solid var(--border);
+    color:var(--text); padding:9px 10px; border-radius:6px; font-size:14px;
+    outline:none; font-family:inherit;
+  }
+  #spotNameInput:focus, #spotMemoInput:focus { border-color:var(--accent); }
+  #spotMemoInput { resize:vertical; min-height:80px; line-height:1.5; }
+  .modal-btns { display:flex; gap:8px; margin-top:6px; }
+  .modal-btns .btn { flex:1; }
+  .btn-ghost { background:transparent; color:var(--text-dim); border:1px solid var(--border); }
+  .btn-ghost:hover { color:var(--text); background:var(--bg-card); }
+
+  #toast {
+    position:fixed; bottom:24px; left:50%;
+    transform:translateX(-50%) translateY(80px);
+    background:var(--bg-card); border:1px solid var(--accent); color:var(--text);
+    padding:10px 18px; border-radius:8px; font-size:13px; z-index:6000;
+    opacity:0; transition:opacity .25s, transform .25s;
+    pointer-events:none; max-width:80vw; text-align:center;
+  }
+  #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- ===== 맵 선택 시작 화면 ===== -->
+<div id="mapSelectOverlay">
+  <h1>어떤 맵인지 선택하시오</h1>
+  <p class="sub">선택하면 고화질 맵으로 바로 이동합니다 (첫 다운로드 후엔 즉시 열림)</p>
+  <p id="syncBadgeSelect"></p>
+  <div class="map-select-grid" id="mapSelectGrid"></div>
+  <div id="selectDl">
+    <div class="t" id="selectDlText">다운로드 중...</div>
+    <div class="bar"><div class="fill" id="selectDlFill"></div></div>
+  </div>
+</div>
+
+<aside id="sidebar">
+  <header>
+    <h1>PUBG Spot Memo</h1>
+    <div class="subrow">
+      <span id="currentMapName">맵 미선택</span>
+      <span id="syncBadge"></span>
+    </div>
+  </header>
+
+  <div class="panel-section">
+    <button class="btn btn-accent" id="changeMapBtn">🗺 맵 변경</button>
+    <button class="btn btn-danger-outline" id="clearAllBtn">🗑 이 맵 데이터 전체 삭제</button>
+  </div>
+
+  <div id="listWrap">
+    <div class="list-title"><span>🚗 고정 차량 스폰 (드래그 이동)</span><span id="vehicleCount">0개</span></div>
+    <div id="vehicleList"></div>
+    <div class="list-title" style="margin-top:8px;"><span>📍 스팟 목록</span><span id="spotCount">0개</span></div>
+    <div id="spotList"></div>
+    <div id="emptyMsg">상단 툴바에서 모드를 선택하고<br>지도를 <b style="color:var(--accent)">클릭</b>해서 추가하세요!</div>
+  </div>
+</aside>
+
+<main id="mapArea">
+  <div id="map"></div>
+
+  <div id="toolbar">
+    <button class="mode-btn active" data-mode="spot">📍 스팟</button>
+    <button class="mode-btn" data-mode="vehicle">🚗 차량</button>
+    <button class="mode-btn" data-mode="flight">✈️ 비행선</button>
+    <button class="mode-btn action" id="circleBtn">⭕ 서클</button>
+    <div class="toolbar-sep"></div>
+    <button class="mode-btn action" id="recommendBtn">🧭 추천 경로</button>
+    <button class="mode-btn action" id="newMatchBtn">🔄 새 판</button>
+  </div>
+  <div id="modeHint"></div>
+
+  <div id="routePanel">
+    <button class="close-route" id="closeRouteBtn">✕</button>
+    <h3>🧭 추천 루트 (클릭하면 지도에 표시)</h3>
+    <div class="strategy-row">
+      <button class="strategy-btn selected" data-strat="grade">🏆 등급 우선</button>
+      <button class="strategy-btn" data-strat="safe">🛡 안전 우선</button>
+      <button class="strategy-btn" data-strat="circle">⭕ 서클 우선</button>
+    </div>
+    <div id="routeList"></div>
+    <div id="routeNote">
+      🛡 안전 우선: 비행선에서 먼 스팟 = 다른 팀과 경합 확률↓<br>
+      ⭕ 서클 우선: 배치한 서클 안쪽 스팟을 우선 추천
+    </div>
+  </div>
+</main>
+
+<div id="modalBackdrop">
+  <div id="modal">
+    <h2>📍 새 스팟 추가</h2>
+    <div class="field">
+      <label>스팟 등급</label>
+      <div class="grade-select" id="gradeSelect"></div>
+    </div>
+    <div class="field">
+      <label for="spotNameInput">스팟 이름</label>
+      <input id="spotNameInput" type="text" placeholder="예: 밀타파워 옥상">
+    </div>
+    <div class="field">
+      <label for="spotMemoInput">상세 메모</label>
+      <textarea id="spotMemoInput" placeholder="예: 초반 파밍 좋음. 3페이즈 안쪽이면 최상급."></textarea>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" id="cancelBtn">취소</button>
+      <button class="btn btn-accent" id="saveBtn">저장</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* =========================================================
+   PUBG 스팟 메모 & 랭크 분석 v4
+   - 시작 시 맵 선택 화면 (정중앙)
+   - 항상 고화질 (IndexedDB 캐시)
+   - Firebase 공유 저장: 누가 저장해도 모두에게 실시간 반영
+     (설정 안 하면 로컬 모드로 자동 전환)
+========================================================= */
+
+const GRADES = ['S','A','B','C','D','E','F'];
+const GRADE_COLORS = { S:'#e74c3c',A:'#f39c12',B:'#f1c40f',C:'#2ecc71',D:'#3498db',E:'#9b59b6',F:'#95a5a6' };
+const GRADE_VALUE = { S:7,A:6,B:5,C:4,D:3,E:2,F:1 };
+const IDB_NAME = 'pubgSpotMemoImages';
+const LAST_MAP_KEY = 'pubg_v4_lastmap';
+
+const PRESET_MAPS = [
+  { key:'Erangel',     label:'에란겔', kmSize:8 },
+  { key:'Miramar',     label:'미라마', kmSize:8 },
+  { key:'Taego',       label:'태이고', kmSize:8 },
+  { key:'Rondo',       label:'론도',   kmSize:8 },
+  { key:'Deston',      label:'데스턴', kmSize:8 },
+  { key:'Vikendi',     label:'비켄디', kmSize:6 },
+  { key:'Sanhok',      label:'사녹',   kmSize:4 },
+  { key:'Paramo',      label:'파라모', kmSize:3 },
+  { key:'Karakin',     label:'카라킨', kmSize:2 },
+  { key:'Haven',       label:'헤이븐', kmSize:1 },
+  { key:'Camp_Jackal', label:'훈련장', kmSize:2 }
+];
+const HIGH_URL = k => `https://media.githubusercontent.com/media/pubg/api-assets/master/Assets/Maps/${k}_Main_High_Res.png`;
+
+// ---------- 공유 저장 (Firebase) ----------
+let db = null;          // firebase database 인스턴스 (없으면 로컬 모드)
+let mapRef = null;      // 현재 맵의 DB 레퍼런스
+let suppressSync = false;
+function initFirebase() {
+  try {
+    if (typeof firebase === 'undefined') return false;
+    if (!FIREBASE_CONFIG || String(FIREBASE_CONFIG.apiKey).includes('여기에')) return false;
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.database();
+    return true;
+  } catch(e) { console.warn('Firebase 초기화 실패:', e); return false; }
+}
+const isShared = () => !!db;
+
+// ---------- 상태 ----------
+let state = {
+  mapKey:null, mapLabel:'', kmSize:8, imgW:0, imgH:0,
+  spots:{},      // id -> {id, grade, name, memo, lat, lng}  (공유)
+  vehicles:{},   // id -> {id, lat, lng}                      (공유)
+  flight:null,   // 개인/판 단위 (로컬)
+  circle:null    // 개인/판 단위 (로컬)
+};
+
+let map=null, imageLayer=null;
+let markers={}, vehicleMarkers={};
+let flightLayer=null, flightTempMarker=null;
+let circleLayer=null, circleCenterHandle=null, circleEdgeHandle=null;
+let routeLayers=[], currentRoutes=[], currentStrategy='grade';
+let mode='spot', flightFirstPoint=null, pendingLatLng=null, selectedGrade='S';
+
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const toastEl = $('#toast');
+function toast(msg, ms=2800) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastEl._t);
+  toastEl._t = setTimeout(() => toastEl.classList.remove('show'), ms);
+}
+const escapeHtml = s => String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+
+// ---------- IndexedDB (고화질 맵 이미지 캐시) ----------
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('images');
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+async function idbGet(key) {
+  try {
+    const dbi = await idbOpen();
+    return await new Promise((res, rej) => {
+      const r = dbi.transaction('images','readonly').objectStore('images').get(key);
+      r.onsuccess = () => res(r.result || null);
+      r.onerror = () => rej(r.error);
+    });
+  } catch(e) { return null; }
+}
+async function idbSet(key, blob) {
+  try {
+    const dbi = await idbOpen();
+    return await new Promise((res, rej) => {
+      const tx = dbi.transaction('images','readwrite');
+      tx.objectStore('images').put(blob, key);
+      tx.oncomplete = () => res(true);
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch(e) { return false; }
+}
+
+// ---------- 데이터 저장/로드 ----------
+// 공유 모드: Firebase 에 스팟/차량 저장 → 모든 접속자에게 실시간 반영
+// 로컬 모드: localStorage (맵별 키)
+function localKey() { return 'pubg_v4_data_' + state.mapKey; }
+function localTacticalKey() { return 'pubg_v4_tact_' + state.mapKey; }
+
+function saveSharedData() {
+  if (isShared()) return; // 공유 모드는 개별 write 로 처리
+  try {
+    localStorage.setItem(localKey(), JSON.stringify({ spots: state.spots, vehicles: state.vehicles }));
+  } catch(e) { toast('❌ 저장 실패'); }
+}
+function saveTactical() { // 비행선/서클은 항상 로컬 (개인 판 단위)
+  try {
+    localStorage.setItem(localTacticalKey(), JSON.stringify({ flight: state.flight, circle: state.circle }));
+  } catch(e) {}
+}
+function loadLocalData() {
+  try {
+    const raw = localStorage.getItem(localKey());
+    if (raw) {
+      const d = JSON.parse(raw);
+      state.spots = d.spots || {};
+      state.vehicles = d.vehicles || {};
+    } else { state.spots = {}; state.vehicles = {}; }
+  } catch(e) { state.spots = {}; state.vehicles = {}; }
+  try {
+    const raw2 = localStorage.getItem(localTacticalKey());
+    if (raw2) {
+      const t = JSON.parse(raw2);
+      state.flight = t.flight || null;
+      state.circle = t.circle || null;
+    } else { state.flight = null; state.circle = null; }
+  } catch(e) { state.flight = null; state.circle = null; }
+}
+
+// 공유 모드 쓰기 헬퍼
+function writeSpot(spot)   { if (isShared()) mapRef.child('spots/'+spot.id).set(spot); else { state.spots[spot.id]=spot; saveSharedData(); } }
+function deleteSpot(id)    { if (isShared()) mapRef.child('spots/'+id).remove();       else { delete state.spots[id]; saveSharedData(); } }
+function writeVehicle(v)   { if (isShared()) mapRef.child('vehicles/'+v.id).set(v);    else { state.vehicles[v.id]=v; saveSharedData(); } }
+function deleteVehicle(id) { if (isShared()) mapRef.child('vehicles/'+id).remove();    else { delete state.vehicles[id]; saveSharedData(); } }
+
+// 공유 모드 실시간 구독
+function subscribeMap() {
+  if (!isShared()) return;
+  if (mapRef) mapRef.off();
+  mapRef = db.ref('maps/' + state.mapKey);
+  mapRef.on('value', snap => {
+    const d = snap.val() || {};
+    state.spots = d.spots || {};
+    state.vehicles = d.vehicles || {};
+    rebuildAllMarkers();
+    rebuildVehicleMarkers();
+    renderLists();
+  });
+}
+
+function updateSyncBadges() {
+  const on = isShared();
+  const html = on
+    ? '<span class="sync-on">● 공유 저장 ON (실시간 동기화)</span>'
+    : '<span class="sync-off">● 로컬 모드 (파일 상단 Firebase 설정 시 공유됨)</span>';
+  $('#syncBadge').innerHTML = html;
+  $('#syncBadgeSelect').innerHTML = html;
+}
+
+// ---------- 지도 ----------
+function initMap() {
+  map = L.map('map', {
+    crs: L.CRS.Simple, minZoom:-5, maxZoom:4,
+    zoomSnap:.25, zoomDelta:.5, wheelPxPerZoomLevel:90,
+    attributionControl:false
+  });
+  map.on('click', onMapClick);
+}
+function displayImage(url, w, h) {
+  if (imageLayer) { map.removeLayer(imageLayer); imageLayer = null; }
+  imageLayer = L.imageOverlay(url, [[0,0],[h,w]]).addTo(map);
+  map.setMaxBounds([[-h*.25,-w*.25],[h*1.25,w*1.25]]);
+  map.fitBounds([[0,0],[h,w]]);
+}
+async function showBlobOnMap(blob) {
+  const url = URL.createObjectURL(blob);
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      state.imgW = img.width; state.imgH = img.height;
+      displayImage(url, img.width, img.height);
+      res();
+    };
+    img.onerror = rej;
+    img.src = url;
+  });
+}
+
+// ---------- 맵 선택 화면 & 고화질 로딩 ----------
+function setSelectDl(show, text='', pct=0) {
+  $('#selectDl').style.display = show ? 'block' : 'none';
+  $('#selectDlText').textContent = text;
+  $('#selectDlFill').style.width = pct + '%';
+}
+
+async function buildSelectGrid() {
+  const grid = $('#mapSelectGrid');
+  grid.innerHTML = '';
+  for (const p of PRESET_MAPS) {
+    const cached = await idbGet(p.key + '_high') ? true : false;
+    const card = document.createElement('button');
+    card.className = 'map-select-card';
+    card.innerHTML = `<div class="mname">${p.label}</div>
+      <div class="msize">${p.kmSize}×${p.kmSize} km</div>
+      <div class="cached">${cached ? '✓ 저장됨 · 즉시 열림' : ''}</div>`;
+    card.addEventListener('click', () => enterMap(p));
+    grid.appendChild(card);
+  }
+}
+
+async function enterMap(preset) {
+  const cacheKey = preset.key + '_high';
+  let blob = await idbGet(cacheKey);
+
+  if (!blob) {
+    // 고화질 다운로드 (진행률)
+    setSelectDl(true, `${preset.label} 고화질 맵 다운로드 중...`, 0);
+    try {
+      const resp = await fetch(HIGH_URL(preset.key));
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const total = +resp.headers.get('content-length') || 0;
+      const reader = resp.body.getReader();
+      const chunks = []; let received = 0;
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        chunks.push(value); received += value.length;
+        if (total) setSelectDl(true, `${preset.label} 다운로드 중... ${(received/1048576).toFixed(0)}/${(total/1048576).toFixed(0)}MB`, Math.round(received/total*100));
+        else setSelectDl(true, `${preset.label} 다운로드 중... ${(received/1048576).toFixed(0)}MB`, 50);
+      }
+      blob = new Blob(chunks, {type:'image/png'});
+      setSelectDl(true, '이미지 준비 중...', 100);
+      idbSet(cacheKey, blob);
+    } catch(e) {
+      // fetch 실패 시 <img> 직접 로드 폴백
+      setSelectDl(true, `${preset.label} 로딩 중... (직접 표시 모드)`, 60);
+      try {
+        await new Promise((res, rej) => {
+          const img = new Image();
+          img.onload = () => {
+            state.imgW = img.width; state.imgH = img.height;
+            displayImage(HIGH_URL(preset.key), img.width, img.height);
+            res();
+          };
+          img.onerror = rej;
+          img.src = HIGH_URL(preset.key);
+        });
+        finishEnterMap(preset);
+        return;
+      } catch(e2) {
+        setSelectDl(false);
+        toast('❌ 맵 로드 실패. 인터넷 연결을 확인해주세요.', 4000);
+        return;
+      }
+    }
+  } else {
+    setSelectDl(true, `${preset.label} 여는 중...`, 100);
+  }
+
+  await showBlobOnMap(blob);
+  finishEnterMap(preset);
+}
+
+function finishEnterMap(preset) {
+  state.mapKey = preset.key;
+  state.mapLabel = preset.label;
+  state.kmSize = preset.kmSize;
+  localStorage.setItem(LAST_MAP_KEY, preset.key);
+  $('#currentMapName').textContent = '🗺 ' + preset.label;
+
+  // 데이터 로드: 공유 모드면 구독, 로컬 모드면 localStorage
+  clearRouteLayers(); removeFlightLayer(); removeCircleLayers();
+  $('#routePanel').style.display = 'none';
+  if (isShared()) {
+    loadLocalData();       // 비행선/서클(로컬)만 복원
+    state.spots = {}; state.vehicles = {};
+    subscribeMap();        // 스팟/차량은 실시간 구독으로 채워짐
+  } else {
+    loadLocalData();
+    rebuildAllMarkers(); rebuildVehicleMarkers(); renderLists();
+  }
+  drawFlightLine(); drawCircle();
+
+  setSelectDl(false);
+  $('#mapSelectOverlay').classList.add('hidden');
+}
+
+$('#changeMapBtn').addEventListener('click', async () => {
+  await buildSelectGrid();
+  $('#mapSelectOverlay').classList.remove('hidden');
+});
+
+// ---------- 거리/기하 ----------
+function distPx(p1, p2) {
+  const dx = p1.lng-p2.lng, dy = p1.lat-p2.lat;
+  return Math.sqrt(dx*dx+dy*dy);
+}
+function pxToKm(px) {
+  const dim = Math.max(state.imgW, state.imgH) || 1;
+  return px * (state.kmSize / dim);
+}
+function fmtKm(px) {
+  const km = pxToKm(px);
+  return km >= 1 ? km.toFixed(2)+'km' : Math.round(km*1000)+'m';
+}
+function pointToSegment(p, a, b) {
+  const abx=b.lng-a.lng, aby=b.lat-a.lat, apx=p.lng-a.lng, apy=p.lat-a.lat;
+  const len2 = abx*abx+aby*aby;
+  let t = len2 ? (apx*abx+apy*aby)/len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const proj = { lat:a.lat+aby*t, lng:a.lng+abx*t };
+  return { dist:distPx(p, proj), proj };
+}
+function extendFlightLine(a, b) {
+  const W=state.imgW, H=state.imgH;
+  const dx=b.lng-a.lng, dy=b.lat-a.lat;
+  if (!dx && !dy) return [a,b];
+  const ts=[];
+  if (dx) ts.push((0-a.lng)/dx,(W-a.lng)/dx);
+  if (dy) ts.push((0-a.lat)/dy,(H-a.lat)/dy);
+  const pts = ts.map(t=>({lat:a.lat+dy*t,lng:a.lng+dx*t}))
+    .filter(p=>p.lng>=-1&&p.lng<=W+1&&p.lat>=-1&&p.lat<=H+1);
+  if (pts.length<2) return [a,b];
+  let best=[pts[0],pts[1]], bd=0;
+  for (let i=0;i<pts.length;i++) for (let j=i+1;j<pts.length;j++) {
+    const d=distPx(pts[i],pts[j]);
+    if (d>bd){bd=d;best=[pts[i],pts[j]];}
+  }
+  return best;
+}
+
+// ---------- 핀 ----------
+const makeGradeIcon = g => L.divIcon({ className:'', html:`<div class="grade-pin" style="background:${GRADE_COLORS[g]||'#888'}">${g}</div>`, iconSize:[32,32], iconAnchor:[16,16] });
+const makeVehicleIcon = () => L.divIcon({ className:'', html:`<div class="vehicle-pin">🚗</div>`, iconSize:[28,28], iconAnchor:[14,14] });
+
+function spotTooltipHtml(spot) {
+  const c = GRADE_COLORS[spot.grade]||'#888';
+  return `<div class="tt-head"><span class="tt-grade" style="background:${c}">${spot.grade}</span>
+    <span class="tt-name">${escapeHtml(spot.name)||'(이름 없음)'}</span></div>
+    <div class="tt-memo">${escapeHtml(spot.memo)||'메모 없음'}</div>`;
+}
+function addSpotMarker(spot) {
+  const m = L.marker([spot.lat, spot.lng], { icon:makeGradeIcon(spot.grade), riseOnHover:true }).addTo(map);
+  m.bindTooltip(spotTooltipHtml(spot), { className:'spot-tooltip', direction:'top', offset:[0,-18], opacity:1 });
+  markers[spot.id] = m;
+}
+function addVehicleMarker(v) {
+  const m = L.marker([v.lat, v.lng], { icon:makeVehicleIcon(), riseOnHover:true, draggable:true }).addTo(map);
+  m.bindTooltip(
+    `<div class="tt-head"><span style="font-size:15px">🚗</span><span class="tt-name">고정 차량 스폰</span></div>
+     <div class="tt-memo">드래그: 위치 조정 · 우클릭: 삭제</div>`,
+    { className:'spot-tooltip vehicle-tooltip', direction:'top', offset:[0,-16], opacity:1 }
+  );
+  m.on('dragend', () => {
+    const ll = m.getLatLng();
+    v.lat = ll.lat; v.lng = ll.lng;
+    writeVehicle(v);
+  });
+  m.on('contextmenu', () => {
+    if (!confirm('이 차량 스폰 마커를 삭제할까요?')) return;
+    deleteVehicle(v.id);
+    if (!isShared()) { map.removeLayer(m); delete vehicleMarkers[v.id]; renderLists(); }
+  });
+  vehicleMarkers[v.id] = m;
+}
+function rebuildAllMarkers() {
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+  Object.values(state.spots).forEach(addSpotMarker);
+}
+function rebuildVehicleMarkers() {
+  Object.values(vehicleMarkers).forEach(m => map.removeLayer(m));
+  vehicleMarkers = {};
+  Object.values(state.vehicles).forEach(addVehicleMarker);
+}
+
+// ---------- 비행선 ----------
+function removeFlightLayer() {
+  if (flightLayer) { map.removeLayer(flightLayer); flightLayer = null; }
+  if (flightTempMarker) { map.removeLayer(flightTempMarker); flightTempMarker = null; }
+}
+function drawFlightLine() {
+  removeFlightLayer();
+  if (!state.flight || !state.imgW) return;
+  const [p1,p2] = extendFlightLine(state.flight.a, state.flight.b);
+  flightLayer = L.polyline([[p1.lat,p1.lng],[p2.lat,p2.lng]], {
+    color:'#fff', weight:3, dashArray:'12 10', opacity:.9
+  }).addTo(map);
+  flightLayer.bindTooltip('✈️ 이번 판 비행선', { className:'spot-tooltip', sticky:true });
+}
+
+// ---------- 서클 ----------
+function removeCircleLayers() {
+  [circleLayer, circleCenterHandle, circleEdgeHandle].forEach(l => { if (l) map.removeLayer(l); });
+  circleLayer = circleCenterHandle = circleEdgeHandle = null;
+}
+function drawCircle() {
+  removeCircleLayers();
+  if (!state.circle || !state.imgW) return;
+  const c = state.circle;
+  circleLayer = L.circle([c.lat,c.lng], {
+    radius:c.r, color:'#fff', weight:2.5, opacity:.9,
+    fillColor:'#fff', fillOpacity:.06, interactive:false
+  }).addTo(map);
+  circleCenterHandle = L.marker([c.lat,c.lng], {
+    icon:L.divIcon({className:'',html:`<div class="circle-handle"></div>`,iconSize:[16,16],iconAnchor:[8,8]}),
+    draggable:true, zIndexOffset:1000
+  }).addTo(map);
+  circleCenterHandle.bindTooltip('⭕ 서클 중심 (드래그로 이동)', { className:'spot-tooltip', direction:'top', offset:[0,-10] });
+  circleEdgeHandle = L.marker([c.lat, c.lng+c.r], {
+    icon:L.divIcon({className:'',html:`<div class="circle-edge-handle"></div>`,iconSize:[14,14],iconAnchor:[7,7]}),
+    draggable:true, zIndexOffset:1000
+  }).addTo(map);
+  circleEdgeHandle.bindTooltip('↔ 드래그로 크기 조절', { className:'spot-tooltip', direction:'top', offset:[0,-10] });
+
+  circleCenterHandle.on('drag', () => {
+    const ll = circleCenterHandle.getLatLng();
+    c.lat = ll.lat; c.lng = ll.lng;
+    circleLayer.setLatLng(ll);
+    circleEdgeHandle.setLatLng([c.lat, c.lng+c.r]);
+  });
+  circleCenterHandle.on('dragend', saveTactical);
+  circleEdgeHandle.on('drag', () => {
+    const ll = circleEdgeHandle.getLatLng();
+    c.r = Math.max(30, distPx({lat:c.lat,lng:c.lng},{lat:ll.lat,lng:ll.lng}));
+    circleLayer.setRadius(c.r);
+  });
+  circleEdgeHandle.on('dragend', () => {
+    circleEdgeHandle.setLatLng([state.circle.lat, state.circle.lng + state.circle.r]);
+    saveTactical();
+  });
+}
+$('#circleBtn').addEventListener('click', () => {
+  if (!state.imgW) return;
+  if (state.circle) {
+    if (!confirm('서클을 제거할까요?')) return;
+    state.circle = null;
+    removeCircleLayers(); saveTactical();
+    toast('서클 제거됨');
+  } else {
+    const center = map.getCenter();
+    state.circle = {
+      lat: Math.max(0, Math.min(state.imgH, center.lat)),
+      lng: Math.max(0, Math.min(state.imgW, center.lng)),
+      r: Math.min(state.imgW, state.imgH) * 0.22
+    };
+    drawCircle(); saveTactical();
+    toast('⭕ 서클 배치! 흰 점=이동, 주황 점=크기 조절', 3500);
+  }
+});
+const insideCircle = p => state.circle && distPx(p, state.circle) <= state.circle.r;
+
+// ---------- 추천 경로 ----------
+function clearRouteLayers() {
+  routeLayers.forEach(l => map.removeLayer(l));
+  routeLayers = [];
+}
+function riskInfo(km) {
+  if (km < 0.9) return { label:'경합주의', cls:'risk-high', icon:'🔴' };
+  if (km < 1.9) return { label:'보통',     cls:'risk-mid',  icon:'🟡' };
+  return { label:'안전', cls:'risk-low', icon:'🟢' };
+}
+function computeRoutes(strategy) {
+  const [fa,fb] = extendFlightLine(state.flight.a, state.flight.b);
+  const vehicles = Object.values(state.vehicles);
+  const routes = [];
+  Object.values(state.spots).forEach(spot => {
+    let best = null;
+    vehicles.forEach(v => {
+      const { dist:jumpDist, proj } = pointToSegment(v, fa, fb);
+      const drive = distPx(v, spot);
+      const travel = pxToKm(jumpDist)*1.5 + pxToKm(drive);
+      if (!best || travel < best.travel) best = { v, jumpDist, jumpPoint:proj, drive, travel };
+    });
+    if (!best) return;
+    const spotFlightKm = pxToKm(pointToSegment(spot, fa, fb).dist);
+    const inC = insideCircle(spot);
+    let score;
+    if (strategy === 'grade') score = GRADE_VALUE[spot.grade]*3 - best.travel;
+    else if (strategy === 'safe') score = GRADE_VALUE[spot.grade]*2 - best.travel + spotFlightKm*1.4;
+    else score = GRADE_VALUE[spot.grade]*2 - best.travel + (inC ? 6 : -4);
+    routes.push({ spot, ...best, spotFlightKm, inCircle:inC, score });
+  });
+  routes.sort((a,b) => b.score - a.score);
+  return routes.slice(0, 4);
+}
+function drawRoute(r) {
+  clearRouteLayers();
+  const jp=r.jumpPoint, cv=r.v, sp=r.spot;
+  const jumpMarker = L.marker([jp.lat,jp.lng], {
+    icon:L.divIcon({className:'',html:`<div class="jump-pin">🪂</div>`,iconSize:[30,30],iconAnchor:[15,15]})
+  }).addTo(map);
+  jumpMarker.bindTooltip('🪂 추천 낙하 지점', { className:'spot-tooltip', direction:'top', offset:[0,-16] });
+  const l1 = L.polyline([[jp.lat,jp.lng],[cv.lat,cv.lng]], { color:'#ff5722', weight:4, dashArray:'4 8', opacity:.95 }).addTo(map);
+  const l2 = L.polyline([[cv.lat,cv.lng],[sp.lat,sp.lng]], { color:'#ff5722', weight:4, opacity:.95 }).addTo(map);
+  l1.bindTooltip(`낙하 → 🚗 (${fmtKm(r.jumpDist)})`, { className:'spot-tooltip', sticky:true });
+  l2.bindTooltip(`🚗 → 스팟 (${fmtKm(r.drive)})`, { className:'spot-tooltip', sticky:true });
+  routeLayers.push(jumpMarker, l1, l2);
+  map.fitBounds(L.latLngBounds([[jp.lat,jp.lng],[cv.lat,cv.lng],[sp.lat,sp.lng]]).pad(0.3));
+}
+function renderRoutePanel() {
+  const list = $('#routeList');
+  list.innerHTML = '';
+  if (!currentRoutes.length) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:6px;">조건에 맞는 루트가 없습니다.</div>';
+    return;
+  }
+  currentRoutes.forEach((r, i) => {
+    const risk = riskInfo(r.spotFlightKm);
+    const item = document.createElement('div');
+    item.className = 'route-item' + (i===0 ? ' selected' : '');
+    item.innerHTML =
+      `<span class="rank">${i+1}순위</span> [${r.spot.grade}] <b>${escapeHtml(r.spot.name)}</b>
+       ${r.inCircle ? '⭕' : ''} <span class="${risk.cls}">${risk.icon} ${risk.label}</span><br>
+       <span class="detail">🪂 ${fmtKm(r.jumpDist)} → 🚗 → 🏁 ${fmtKm(r.drive)}</span>`;
+    item.addEventListener('click', () => {
+      list.querySelectorAll('.route-item').forEach(el => el.classList.remove('selected'));
+      item.classList.add('selected');
+      drawRoute(r);
+    });
+    list.appendChild(item);
+  });
+}
+function recommend() {
+  if (!state.imgW) return;
+  if (!state.flight) { toast('✈️ 먼저 비행선을 그어주세요!'); return; }
+  if (!Object.keys(state.vehicles).length) { toast('🚗 차량 스폰을 표시해주세요!'); return; }
+  if (!Object.keys(state.spots).length) { toast('📍 파밍 스팟을 1개 이상 등록해주세요!'); return; }
+  if (currentStrategy === 'circle' && !state.circle) {
+    toast('⭕ 서클이 없어 등급 우선으로 추천합니다', 3000);
+    currentStrategy = 'grade';
+    $$('.strategy-btn').forEach(b => b.classList.toggle('selected', b.dataset.strat === 'grade'));
+  }
+  currentRoutes = computeRoutes(currentStrategy);
+  renderRoutePanel();
+  $('#routePanel').style.display = 'block';
+  if (currentRoutes.length) drawRoute(currentRoutes[0]);
+}
+$('#recommendBtn').addEventListener('click', recommend);
+$('#closeRouteBtn').addEventListener('click', () => {
+  $('#routePanel').style.display = 'none';
+  clearRouteLayers();
+});
+$$('.strategy-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    currentStrategy = b.dataset.strat;
+    $$('.strategy-btn').forEach(x => x.classList.remove('selected'));
+    b.classList.add('selected');
+    recommend();
+  });
+});
+
+// ---------- 모드/클릭 ----------
+const HINTS = {
+  spot:'지도를 클릭하면 스팟을 추가합니다',
+  vehicle:'차가 고정으로 젠 되는 위치를 클릭하세요 (드래그 이동 / 우클릭 삭제)',
+  flight:'비행선 시작점 → 끝점 순서로 2번 클릭하세요'
+};
+function setMode(m) {
+  mode = m;
+  flightFirstPoint = null;
+  if (flightTempMarker) { map.removeLayer(flightTempMarker); flightTempMarker = null; }
+  $$('.mode-btn[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  const hint = $('#modeHint');
+  hint.textContent = HINTS[m];
+  hint.style.display = 'block';
+  clearTimeout(hint._t);
+  hint._t = setTimeout(() => hint.style.display = 'none', 3500);
+}
+$$('.mode-btn[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+function onMapClick(e) {
+  if (!state.imgW) return;
+  if (mode === 'spot') {
+    pendingLatLng = e.latlng;
+    openModal();
+  } else if (mode === 'vehicle') {
+    const v = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng };
+    writeVehicle(v);
+    if (!isShared()) { addVehicleMarker(v); renderLists(); }
+    toast('🚗 차량 스폰 추가');
+  } else if (mode === 'flight') {
+    if (!flightFirstPoint) {
+      flightFirstPoint = e.latlng;
+      flightTempMarker = L.circleMarker(e.latlng, { radius:6, color:'#fff', fillColor:'#fff', fillOpacity:1 }).addTo(map);
+      toast('✈️ 끝점을 클릭하세요');
+    } else {
+      state.flight = {
+        a:{lat:flightFirstPoint.lat,lng:flightFirstPoint.lng},
+        b:{lat:e.latlng.lat,lng:e.latlng.lng}
+      };
+      flightFirstPoint = null;
+      drawFlightLine(); saveTactical();
+      toast('✈️ 비행선 완료! 🧭 추천 경로를 눌러보세요');
+      setMode('spot');
+    }
+  }
+}
+$('#newMatchBtn').addEventListener('click', () => {
+  state.flight = null; state.circle = null;
+  removeFlightLayer(); removeCircleLayers(); clearRouteLayers();
+  $('#routePanel').style.display = 'none';
+  flightFirstPoint = null;
+  saveTactical();
+  toast('🔄 새 판! 비행선/서클/추천 경로 초기화');
+});
+
+// ---------- 사이드바 목록 ----------
+function renderLists() {
+  const vArr = Object.values(state.vehicles);
+  const vList = $('#vehicleList');
+  vList.innerHTML = '';
+  $('#vehicleCount').textContent = vArr.length + '개';
+  vArr.forEach((v, i) => {
+    const card = document.createElement('div');
+    card.className = 'spot-card';
+    card.style.borderLeftColor = 'var(--vehicle)';
+    card.innerHTML = `<div class="card-top">
+      <span style="font-size:16px">🚗</span>
+      <span class="spot-name">차량 스폰 #${i+1}</span>
+      <button class="del-spot-btn">✕</button></div>`;
+    card.addEventListener('click', () => {
+      map.flyTo([v.lat,v.lng], Math.max(map.getZoom(),0), {duration:.5});
+      const m = vehicleMarkers[v.id];
+      if (m) { m.openTooltip(); setTimeout(()=>m.closeTooltip(),2000); }
+    });
+    card.querySelector('.del-spot-btn').addEventListener('click', ev => {
+      ev.stopPropagation();
+      deleteVehicle(v.id);
+      if (!isShared()) {
+        if (vehicleMarkers[v.id]) { map.removeLayer(vehicleMarkers[v.id]); delete vehicleMarkers[v.id]; }
+        renderLists();
+      }
+    });
+    vList.appendChild(card);
+  });
+
+  const sArr = Object.values(state.spots);
+  const sList = $('#spotList');
+  sList.innerHTML = '';
+  $('#spotCount').textContent = sArr.length + '개';
+  $('#emptyMsg').style.display = (sArr.length || vArr.length) ? 'none' : 'block';
+  sArr.sort((a,b) => GRADE_VALUE[b.grade]-GRADE_VALUE[a.grade]).forEach(spot => {
+    const c = GRADE_COLORS[spot.grade]||'#888';
+    const card = document.createElement('div');
+    card.className = 'spot-card';
+    card.style.borderLeftColor = c;
+    card.innerHTML = `<div class="card-top">
+      <span class="grade-badge" style="background:${c}">${spot.grade}</span>
+      <span class="spot-name">${escapeHtml(spot.name)||'(이름 없음)'}</span>
+      <button class="del-spot-btn" title="삭제">✕</button></div>
+      ${spot.memo ? `<div class="spot-memo">${escapeHtml(spot.memo)}</div>` : ''}`;
+    card.addEventListener('click', () => {
+      map.flyTo([spot.lat,spot.lng], Math.max(map.getZoom(),0), {duration:.5});
+      const m = markers[spot.id];
+      if (m) { m.openTooltip(); setTimeout(()=>m.closeTooltip(),2500); }
+    });
+    card.querySelector('.del-spot-btn').addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (!confirm(`"${spot.name||'이름 없음'}" 스팟을 삭제할까요?\n(공유 모드에서는 모두에게서 삭제됩니다)`)) return;
+      deleteSpot(spot.id);
+      if (!isShared()) {
+        if (markers[spot.id]) { map.removeLayer(markers[spot.id]); delete markers[spot.id]; }
+        renderLists();
+      }
+    });
+    sList.appendChild(card);
+  });
+}
+
+// ---------- 스팟 모달 ----------
+function buildGradeButtons() {
+  const gs = $('#gradeSelect');
+  gs.innerHTML = '';
+  GRADES.forEach(g => {
+    const b = document.createElement('div');
+    b.className = 'grade-opt' + (g === selectedGrade ? ' selected' : '');
+    b.style.background = GRADE_COLORS[g];
+    b.textContent = g;
+    b.addEventListener('click', () => {
+      selectedGrade = g;
+      gs.querySelectorAll('.grade-opt').forEach(el => el.classList.remove('selected'));
+      b.classList.add('selected');
+    });
+    gs.appendChild(b);
+  });
+}
+function openModal() {
+  selectedGrade = 'S';
+  $('#spotNameInput').value = '';
+  $('#spotMemoInput').value = '';
+  buildGradeButtons();
+  $('#modalBackdrop').classList.add('open');
+  setTimeout(() => $('#spotNameInput').focus(), 50);
+}
+function closeModal() {
+  $('#modalBackdrop').classList.remove('open');
+  pendingLatLng = null;
+}
+$('#cancelBtn').addEventListener('click', closeModal);
+$('#modalBackdrop').addEventListener('click', e => { if (e.target.id === 'modalBackdrop') closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('#modalBackdrop').classList.contains('open')) closeModal();
+});
+$('#saveBtn').addEventListener('click', () => {
+  if (!pendingLatLng) { closeModal(); return; }
+  const name = $('#spotNameInput').value.trim();
+  if (!name) { toast('스팟 이름을 입력해주세요!'); $('#spotNameInput').focus(); return; }
+  const spot = {
+    id: uid(), grade: selectedGrade, name,
+    memo: $('#spotMemoInput').value.trim(),
+    lat: pendingLatLng.lat, lng: pendingLatLng.lng
+  };
+  writeSpot(spot);
+  if (!isShared()) { addSpotMarker(spot); renderLists(); }
+  closeModal();
+  toast(`✅ [${spot.grade}] ${spot.name} 추가${isShared() ? ' (모두에게 공유됨)' : ''}`);
+});
+$('#spotNameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveBtn').click(); });
+
+// ---------- 전체 삭제 ----------
+$('#clearAllBtn').addEventListener('click', () => {
+  if (!state.mapKey) return;
+  const msg = isShared()
+    ? `[${state.mapLabel}] 맵의 공유 데이터(스팟/차량)를 전부 삭제합니다.\n⚠️ 모든 사용자에게서 삭제됩니다! 계속할까요?`
+    : `[${state.mapLabel}] 맵의 내 데이터를 전부 삭제할까요?`;
+  if (!confirm(msg)) return;
+  if (isShared()) {
+    mapRef.remove();
+  } else {
+    state.spots = {}; state.vehicles = {};
+    saveSharedData();
+    rebuildAllMarkers(); rebuildVehicleMarkers(); renderLists();
+  }
+  state.flight = null; state.circle = null;
+  removeFlightLayer(); removeCircleLayers(); clearRouteLayers();
+  $('#routePanel').style.display = 'none';
+  saveTactical();
+  toast('삭제 완료');
+});
+
+// ---------- 초기화 ----------
+(async function init() {
+  initMap();
+  const fbOk = initFirebase();
+  updateSyncBadges();
+  await buildSelectGrid();
+  // 시작 화면은 항상 표시 — 맵을 선택해야 입장
+})();
+</script>
+</body>
+</html>
