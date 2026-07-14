@@ -28,7 +28,7 @@ const DELETE_PASSWORD = "1124";
     --border:#333336; --text:#eaeaea; --text-dim:#9a9a9e;
     --accent:#f39c12; --danger:#e74c3c;
     --vehicle:#00bcd4; --route:#ff5722;
-    --line-yellow:#f1c40f; --line-blue:#3498db; --line-green:#2ecc71; --line-orange:#ff8c1a;
+    --line-yellow:#f1c40f; --line-blue:#3498db; --line-green:#2ecc71; --line-orange:#ff8c1a; --line-red:#ff1744;
     --myloc:#2196f3;
     --team-1:#2196f3; --team-2:#2ecc71; --team-3:#ff9800; --team-4:#e91e63;
   }
@@ -148,6 +148,12 @@ const DELETE_PASSWORD = "1124";
   .color-dot { width:22px; height:22px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:transform .1s, border-color .1s; }
   .color-dot:hover { transform:scale(1.15); }
   .color-dot.selected { border-color:#fff; transform:scale(1.15); }
+  .color-dot-danger { position:relative; box-shadow:0 0 6px rgba(255,23,68,.8); }
+  .color-dot-danger::after {
+    content:''; position:absolute; inset:5px;
+    background:repeating-linear-gradient(90deg, #fff 0 3px, transparent 3px 6px);
+    height:2px; top:50%; margin-top:-1px; border-radius:1px;
+  }
 
   #teamSlotBar {
     position:absolute; top:62px; left:50%; transform:translateX(-50%);
@@ -408,6 +414,7 @@ const DELETE_PASSWORD = "1124";
     📍 스팟은 <b style="color:var(--accent)">마우스만 올려도</b> 장단점이 바로 보여요<br>
     🗑 모든 핀/선은 <b style="color:var(--accent)">더블클릭</b>하면 바로 삭제돼요<br>
     ➖ 선은 몸통을 드래그하면 통째로 이동됩니다<br>
+    🚨 선긋기에서 <b style="color:var(--accent)">빨강</b> 선택 = 점선 경계선 (적 예상 방향)<br>
     ⭕ <b style="color:var(--accent)">서클을 켜야</b> 그 안의 스팟이 보여요 (안 켜면 스팟 숨김)<br>
     ⭐ 툴바 버튼 <b style="color:var(--accent)">더블클릭</b> = 그 항목 지도 표시 on/off<br>
     👥 팀 위치는 1~4번, 번호당 1개만 유지 · 모두에게 실시간 공유<br>
@@ -435,10 +442,11 @@ const DELETE_PASSWORD = "1124";
   </div>
   <div id="modeHint"></div>
   <div id="lineColorBar">
-    <div class="color-dot selected" style="background:var(--line-yellow)" data-color="yellow"></div>
-    <div class="color-dot" style="background:var(--line-blue)" data-color="blue"></div>
-    <div class="color-dot" style="background:var(--line-green)" data-color="green"></div>
-    <div class="color-dot" style="background:var(--line-orange)" data-color="orange"></div>
+    <div class="color-dot selected" style="background:var(--line-yellow)" data-color="yellow" title="이동경로 (노랑)"></div>
+    <div class="color-dot" style="background:var(--line-blue)" data-color="blue" title="이동경로 (파랑)"></div>
+    <div class="color-dot" style="background:var(--line-green)" data-color="green" title="이동경로 (초록)"></div>
+    <div class="color-dot" style="background:var(--line-orange)" data-color="orange" title="이동경로 (주황)"></div>
+    <div class="color-dot color-dot-danger" style="background:var(--line-red)" data-color="red" title="🚨 경계선 (빨강 점선) — 적 예상 방향"></div>
   </div>
   <div id="teamSlotBar">
     <div class="team-slot-dot selected" style="background:var(--team-1)" data-slot="1">1</div>
@@ -506,7 +514,8 @@ const DELETE_PASSWORD = "1124";
 const GRADES = ['S','A','B','C','D','E','F'];
 const GRADE_COLORS = { S:'#e74c3c',A:'#f39c12',B:'#f1c40f',C:'#2ecc71',D:'#3498db',E:'#9b59b6',F:'#95a5a6' };
 const GRADE_VALUE = { S:7,A:6,B:5,C:4,D:3,E:2,F:1 };
-const LINE_COLORS = { yellow:'#f1c40f', blue:'#3498db', green:'#2ecc71', orange:'#ff8c1a' };
+const LINE_COLORS = { yellow:'#f1c40f', blue:'#3498db', green:'#2ecc71', orange:'#ff8c1a', red:'#ff1744' };
+const DASHED_LINE_COLORS = new Set(['red']); // 이 색상은 점선으로 표시 (경계/위험 방향선)
 const IDB_NAME = 'pubgSpotMemoImages';
 const LAST_MAP_KEY = 'pubg_v7_lastmap';
 const LAYER_KEY = 'pubg_v7_layers';
@@ -1059,9 +1068,13 @@ function removeLineLayer(id) {
 function addLineLayer(line) {
   removeLineLayer(line.id);
   const color = LINE_COLORS[line.color] || '#fff';
+  const isDanger = DASHED_LINE_COLORS.has(line.color);
   // 넓은 투명 히트라인: 얇은 선도 쉽게 클릭/드래그할 수 있도록 실제 선 아래에 깔아둠
   const hit = L.polyline([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]], { color:'#000', weight:22, opacity:0 }).addTo(lineLayer);
-  const poly = L.polyline([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]], { color, weight:5, opacity:.92, interactive:false }).addTo(lineLayer);
+  const poly = L.polyline([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]], {
+    color, weight: isDanger ? 4 : 5, opacity:.92, interactive:false,
+    dashArray: isDanger ? '10 8' : null
+  }).addTo(lineLayer);
   const h1 = L.marker([line.a.lat,line.a.lng], { icon:L.divIcon({className:'',html:`<div class="line-handle"></div>`,iconSize:[13,13],iconAnchor:[6,6]}), draggable:true, zIndexOffset:900 }).addTo(lineLayer);
   const h2 = L.marker([line.b.lat,line.b.lng], { icon:L.divIcon({className:'',html:`<div class="line-handle"></div>`,iconSize:[13,13],iconAnchor:[6,6]}), draggable:true, zIndexOffset:900 }).addTo(lineLayer);
 
@@ -1345,7 +1358,7 @@ const HINTS = {
   spot:'지도를 클릭하면 스팟을 추가합니다 (지도 더블클릭으로도 추가 가능)',
   vehicle:'차가 고정으로 젠 되는 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
   flight:'비행선 시작점 → 끝점 순서로 2번 클릭하세요 (더블클릭으로 삭제)',
-  line:'색상을 고르고 시작점 → 끝점 순서로 2번 클릭하세요 (몸통 드래그 이동, 더블클릭 삭제)',
+  line:'색상을 고르고 시작점 → 끝점 순서로 2번 클릭하세요 (몸통 드래그 이동, 더블클릭 삭제) · 빨강=경계선(점선)',
   enemy:'적을 목격한 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
   team:'번호를 고르고 지도를 클릭하면 그 팀원 위치가 표시돼요 (드래그 이동 · 더블클릭 삭제, 번호당 1개만 유지)',
   label:'제목/소제목을 고르고 지도를 클릭하면 텍스트를 입력할 수 있어요 (드래그 이동 · 더블클릭 삭제)'
