@@ -29,7 +29,7 @@ const DELETE_PASSWORD = "1124";
     --accent:#f39c12; --danger:#e74c3c;
     --vehicle:#00bcd4; --route:#ff5722;
     --line-yellow:#f1c40f; --line-blue:#3498db; --line-green:#2ecc71; --line-orange:#ff8c1a;
-    --myloc:#2196f3; --dest:#e040fb; --eraser:#ff1744;
+    --myloc:#2196f3; --dest:#e040fb;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body { height:100%; overflow:hidden; }
@@ -129,9 +129,8 @@ const DELETE_PASSWORD = "1124";
   }
   .mode-btn:hover { color:var(--text); background:rgba(255,255,255,.06); }
   .mode-btn.active { color:var(--accent); border-color:var(--accent); background:rgba(243,156,18,.12); }
-  .mode-btn.eraser-active { color:var(--eraser); border-color:var(--eraser); background:rgba(255,23,68,.14); }
-  .mode-btn.layer-off { opacity:.4; text-decoration:line-through; }
   .mode-btn.action { color:var(--text); }
+  .mode-btn.layer-off { opacity:.4; text-decoration:line-through; }
   .toolbar-sep { width:1px; background:var(--border); margin:2px 2px; }
   #modeHint {
     position:absolute; top:62px; left:50%; transform:translateX(-50%);
@@ -158,7 +157,11 @@ const DELETE_PASSWORD = "1124";
     cursor:pointer; transition:transform .1s;
   }
   .grade-pin:hover { transform:scale(1.18); }
-  .grade-pin.erase-hover { outline:3px solid var(--eraser); }
+  .spot-dot {
+    width:12px; height:12px; border-radius:50%; background:#2ecc71;
+    border:2px solid #fff; box-shadow:0 1px 5px rgba(0,0,0,.6); cursor:pointer;
+  }
+  .spot-dot:hover { transform:scale(1.3); }
   .vehicle-pin {
     display:flex; align-items:center; justify-content:center;
     width:28px; height:28px; border-radius:6px; font-size:15px;
@@ -364,9 +367,11 @@ const DELETE_PASSWORD = "1124";
   <div id="sidebarFooter">
     🖱 지도 <b style="color:var(--accent)">더블클릭</b> = 스팟 추가 버튼 노출<br>
     📍 스팟은 <b style="color:var(--accent)">마우스만 올려도</b> 장단점이 바로 보여요<br>
-    🧹 지우개 = 모든 핀/선 삭제 · ➖ 선은 몸통 드래그로 이동<br>
+    🗑 모든 핀/선은 <b style="color:var(--accent)">더블클릭</b>하면 바로 삭제돼요<br>
+    ➖ 선은 몸통을 드래그하면 통째로 이동됩니다<br>
+    ⭕ <b style="color:var(--accent)">서클을 켜야</b> 그 안의 스팟이 보여요 (안 켜면 스팟 숨김)<br>
     ⭐ 툴바 버튼 <b style="color:var(--accent)">더블클릭</b> = 그 항목 지도 표시 on/off<br>
-    ⭕ 서클 배치 시 내부 핀만 표시 · 😀+⭕ 둘 다 있으면<br>우측하단 아래 <b style="color:var(--accent)">🧭 서클 내 최적 이동</b>으로 추천<br>
+    😀+⭕ 둘 다 있으면 <b style="color:var(--accent)">🧭 서클 내 최적 이동</b>으로 추천<br>
     🔄 리셋(우측 하단)은 스팟·차량은 그대로 두고<br>비행선·선·적표시·내위치·목적지만 초기화
   </div>
 </aside>
@@ -383,7 +388,6 @@ const DELETE_PASSWORD = "1124";
     <button class="mode-btn" data-mode="myloc">😀 내 위치</button>
     <button class="mode-btn" data-mode="dest">🏁 목적지 추천</button>
     <div class="toolbar-sep"></div>
-    <button class="mode-btn" data-mode="eraser">🧹 지우개</button>
     <button class="mode-btn action" id="circleBtn">⭕ 서클</button>
     <button class="mode-btn action" id="circleRecommendBtn">🧭 서클 내 최적 이동</button>
     <div class="toolbar-sep"></div>
@@ -443,7 +447,7 @@ const DELETE_PASSWORD = "1124";
 <script>
 /* =========================================================
    PUBG 스팟 메모 & 랭크 분석 v7
-   - 지우개 모드로 모든 종류의 핀/선 통합 삭제
+   - 더블클릭으로 모든 종류의 핀/선 통합 삭제
    - 레이어 표시 설정: 토글 시 실제로 지도 레이어를 add/remove
    - 내 위치 / 목적지 핀 + 목적지 근처 추천 스팟
    - 사이드바 리스트(스팟목록 등) 전면 제거
@@ -825,7 +829,7 @@ function finishEnterMap(preset) {
   state.mapKey = preset.key; state.mapLabel = preset.label; state.kmSize = preset.kmSize;
   localStorage.setItem(LAST_MAP_KEY, preset.key);
   $('#currentMapName').textContent = '🗺 ' + preset.label;
-  clearRouteLayers(); removeFlightLayer(); removeCircleLayers(); removeMyLocMarker(); removeDestMarker();
+  clearRouteLayers(); removeFlightLayer(); removeCircleLayers(); removeMyLocMarker(); removeDestMarker(); clearCircleRecommend();
   $('#routePanel').style.display = 'none';
   if (isShared()) { loadLocalData(); state.spots={}; state.vehicles={}; state.lines={}; subscribeMap(); }
   else { loadLocalData(); rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); }
@@ -864,6 +868,7 @@ function extendFlightLine(a, b) {
 
 // ---------- 핀 ----------
 const makeGradeIcon = g => L.divIcon({ className:'', html:`<div class="grade-pin" style="background:${GRADE_COLORS[g]||'#888'}">${g}</div>`, iconSize:[32,32], iconAnchor:[16,16] });
+const makeDotIcon = () => L.divIcon({ className:'', html:`<div class="spot-dot"></div>`, iconSize:[12,12], iconAnchor:[6,6] });
 const makeVehicleIcon = () => L.divIcon({ className:'', html:`<div class="vehicle-pin">🚗</div>`, iconSize:[28,28], iconAnchor:[14,14] });
 const makeEnemyIcon = () => L.divIcon({ className:'', html:`<div class="enemy-pin"></div>`, iconSize:[18,18], iconAnchor:[9,9] });
 const makeMyLocIcon = () => L.divIcon({ className:'', html:`<div class="myloc-pin">😀</div>`, iconSize:[26,26], iconAnchor:[13,13] });
@@ -919,31 +924,35 @@ function addSpotMarker(spot) {
   m.on('click', (e) => {
     L.DomEvent.stopPropagation(e);
     hideHoverCard();
-    if (mode === 'eraser') { deleteSpot(spot.id); toast('🧹 스팟 삭제됨'); return; }
     openEditModal(spot);
+  });
+  m.on('dblclick', (e) => {
+    L.DomEvent.stopPropagation(e);
+    hideHoverCard();
+    deleteSpot(spot.id);
+    toast('🗑 스팟 삭제됨');
   });
   markers[spot.id] = m;
 }
 function addVehicleMarker(v) {
   const m = L.marker([v.lat, v.lng], { icon:makeVehicleIcon(), riseOnHover:true, draggable:true }).addTo(vehicleLayer);
   bindHoverCard(m, () => `<div class="hc-head"><span style="font-size:16px">🚗</span><span class="hc-name">고정 차량 스폰</span></div>
-     <div class="hc-empty">드래그: 위치 조정 · 🧹 지우개: 삭제</div>`, 'vehicle');
+     <div class="hc-empty">드래그: 위치 조정 · 더블클릭: 삭제</div>`, 'vehicle');
   m.on('dragend', () => { const ll = m.getLatLng(); v.lat=ll.lat; v.lng=ll.lng; writeVehicle(v); });
-  m.on('click', (e) => {
-    if (mode !== 'eraser') return;
+  m.on('dblclick', (e) => {
     L.DomEvent.stopPropagation(e);
     hideHoverCard();
     deleteVehicle(v.id);
-    toast('🧹 차량 스폰 삭제됨');
+    toast('🗑 차량 스폰 삭제됨');
   });
   vehicleMarkers[v.id] = m;
 }
 function addEnemyMarker(en) {
-  const m = L.marker([en.lat, en.lng], { icon:makeEnemyIcon(), riseOnHover:true }).addTo(enemyLayer);
+  const m = L.marker([en.lat, en.lng], { icon:makeEnemyIcon(), riseOnHover:true, draggable:true }).addTo(enemyLayer);
   bindHoverCard(m, () => `<div class="hc-head"><span style="font-size:16px">🔴</span><span class="hc-name">적 목격 위치</span></div>
-    <div class="hc-empty">🧹 지우개 클릭 시 삭제</div>`);
-  m.on('click', (e) => {
-    if (mode !== 'eraser') return;
+    <div class="hc-empty">드래그: 위치 조정 · 더블클릭: 삭제</div>`);
+  m.on('dragend', () => { const ll = m.getLatLng(); en.lat=ll.lat; en.lng=ll.lng; saveTactical(); });
+  m.on('dblclick', (e) => {
     L.DomEvent.stopPropagation(e);
     hideHoverCard();
     delete state.enemies[en.id];
@@ -957,7 +966,7 @@ function rebuildAllMarkers() { Object.values(markers).forEach(m => spotLayer.rem
 function rebuildVehicleMarkers() { Object.values(vehicleMarkers).forEach(m => vehicleLayer.removeLayer(m)); vehicleMarkers = {}; Object.values(state.vehicles).forEach(addVehicleMarker); }
 function rebuildEnemyMarkers() { Object.values(enemyMarkers).forEach(m => enemyLayer.removeLayer(m)); enemyMarkers = {}; Object.values(state.enemies).forEach(addEnemyMarker); }
 
-// ---------- 선긋기 (4색, 드래그 편집, 지우개로 삭제) ----------
+// ---------- 선긋기 (4색, 드래그 편집, 더블클릭으로 삭제) ----------
 function removeLineLayer(id) {
   const obj = lineLayers[id];
   if (!obj) return;
@@ -984,18 +993,16 @@ function addLineLayer(line) {
   h2.on('dragend', () => writeLine(line));
 
   const eraseLine = (e) => {
-    if (mode !== 'eraser') return;
     L.DomEvent.stopPropagation(e);
     deleteLine(line.id);
-    toast('🧹 선 삭제됨');
+    toast('🗑 선 삭제됨');
   };
-  hit.on('click', eraseLine);
-  h1.on('click', eraseLine);
-  h2.on('click', eraseLine);
+  hit.on('dblclick', eraseLine);
+  h1.on('dblclick', eraseLine);
+  h2.on('dblclick', eraseLine);
 
-  // 선 전체를 잡아서 통째로 이동 (지우개 모드가 아닐 때만) — 전역 mousemove/mouseup 리스너(초기화 시 1회 등록)를 사용
+  // 선 전체를 잡아서 통째로 이동 — 전역 mousemove/mouseup 리스너(초기화 시 1회 등록)를 사용
   hit.on('mousedown', (e) => {
-    if (mode === 'eraser') return;
     L.DomEvent.stopPropagation(e);
     draggingLine = {
       line,
@@ -1028,8 +1035,8 @@ function drawFlightLine() {
   if (!state.flight || !state.imgW) return;
   const [p1,p2] = extendFlightLine(state.flight.a, state.flight.b);
   flightLine = L.polyline([[p1.lat,p1.lng],[p2.lat,p2.lng]], { color:'#fff', weight:3, dashArray:'12 10', opacity:.9 }).addTo(flightGroup);
-  flightLine.bindTooltip('✈️ 이번 판 비행선 (🧹 지우개로 삭제)', { className:'spot-tooltip', sticky:true });
-  flightLine.on('click', e => { if (mode === 'eraser') { L.DomEvent.stopPropagation(e); state.flight=null; removeFlightLayer(); saveTactical(); toast('🧹 비행선 삭제됨'); } });
+  flightLine.bindTooltip('✈️ 이번 판 비행선 (더블클릭으로 삭제)', { className:'spot-tooltip', sticky:true });
+  flightLine.on('dblclick', e => { L.DomEvent.stopPropagation(e); state.flight=null; removeFlightLayer(); saveTactical(); toast('🗑 비행선 삭제됨'); });
 }
 
 // ---------- 서클 ----------
@@ -1054,29 +1061,31 @@ function drawCircle() {
     circleEdgeHandle.setLatLng([c.lat, c.lng+c.r]);
     applyCircleFilter();
   });
-  circleCenterHandle.on('dragend', saveTactical);
+  circleCenterHandle.on('dragend', () => { saveTactical(); if (state.myLocation) recommendInsideCircle(true); });
   circleEdgeHandle.on('drag', () => {
     const ll = circleEdgeHandle.getLatLng();
     c.r = Math.max(30, distPx({lat:c.lat,lng:c.lng},{lat:ll.lat,lng:ll.lng}));
     circleShape.setRadius(c.r);
     applyCircleFilter();
   });
-  circleEdgeHandle.on('dragend', () => { circleEdgeHandle.setLatLng([state.circle.lat, state.circle.lng + state.circle.r]); saveTactical(); });
+  circleEdgeHandle.on('dragend', () => { circleEdgeHandle.setLatLng([state.circle.lat, state.circle.lng + state.circle.r]); saveTactical(); if (state.myLocation) recommendInsideCircle(true); });
 }
 $('#circleBtn').addEventListener('click', () => {
   if (!state.imgW) return;
   if (state.circle) {
-    if (!confirm('서클을 제거할까요? (제거하면 숨겨진 핀들이 다시 보입니다)')) return;
+    if (!confirm('서클을 제거할까요? (제거하면 스팟이 지도에서 숨겨집니다)')) return;
     state.circle = null;
     removeCircleLayers(); saveTactical();
     applyCircleFilter();
-    toast('서클 제거됨 — 모든 핀이 다시 보입니다');
+    clearCircleRecommend();
+    toast('서클 제거됨 — 스팟이 숨겨졌습니다 (다시 켜면 보여요)');
   } else {
     const center = map.getCenter();
     state.circle = { lat: Math.max(0, Math.min(state.imgH, center.lat)), lng: Math.max(0, Math.min(state.imgW, center.lng)), r: Math.min(state.imgW, state.imgH) * 0.22 };
     drawCircle(); saveTactical();
     applyCircleFilter();
-    toast('⭕ 서클 배치! 서클 밖 핀은 자동으로 숨겨집니다', 3500);
+    toast('⭕ 서클 배치! 이제 서클 안 스팟만 지도에 표시됩니다', 3500);
+    if (state.myLocation) recommendInsideCircle();
   }
 });
 const insideCircle = p => state.circle && distPx(p, state.circle) <= state.circle.r;
@@ -1087,13 +1096,13 @@ function clearCircleRecommend() {
   if (circleRecoLine) { map.removeLayer(circleRecoLine); circleRecoLine = null; }
   if (circleRecoMarker) { map.removeLayer(circleRecoMarker); circleRecoMarker = null; }
 }
-function recommendInsideCircle() {
+function recommendInsideCircle(auto) {
   if (!state.imgW) return;
-  if (!state.circle) { toast('⭕ 먼저 서클을 배치해주세요'); return; }
-  if (!state.myLocation) { toast('😀 먼저 내 위치를 찍어주세요'); return; }
+  if (!state.circle) { if (!auto) toast('⭕ 먼저 서클을 배치해주세요'); return; }
+  if (!state.myLocation) { if (!auto) toast('😀 먼저 내 위치를 찍어주세요'); return; }
   clearCircleRecommend();
   const result = pickBestSpot(state.myLocation, { requireInsideCircle: true });
-  if (!result.spot) { toast('⭕ 서클 안에 등록된 스팟이 없어요'); return; }
+  if (!result.spot) { if (!auto) toast('⭕ 서클 안에 등록된 스팟이 없어요'); return; }
 
   circleRecoLine = L.polyline([[state.myLocation.lat,state.myLocation.lng],[result.spot.lat,result.spot.lng]], {
     color:'#18ffff', weight:4, dashArray:'2 8', opacity:.95
@@ -1103,18 +1112,27 @@ function recommendInsideCircle() {
   }).addTo(map);
 
   const km = fmtKm(distPx(state.myLocation, result.spot));
+  const outside = !insideCircle(state.myLocation);
   const warn = result.allDangerous
     ? ' ⚠️ 서클 안 스팟 전부 적 표시 있음! 신중하게 이동하세요'
     : (result.avoidedEnemy ? ' 🛡 적 표시 지역은 피해서 추천했어요' : '');
-  toast(`🧭 [${result.spot.grade}] ${result.spot.name}로 이동 추천 (${km})${warn}`, 4500);
-  map.fitBounds(L.latLngBounds([[state.myLocation.lat,state.myLocation.lng],[result.spot.lat,result.spot.lng]]).pad(0.35));
+  const prefix = outside ? '⚠️ 내 위치가 서클 밖에 있어요! ' : '';
+  toast(`${prefix}🧭 [${result.spot.grade}] ${result.spot.name}로 이동 추천 (${km})${warn}`, 4800);
+  if (!auto) map.fitBounds(L.latLngBounds([[state.myLocation.lat,state.myLocation.lng],[result.spot.lat,result.spot.lng]]).pad(0.35));
 }
 $('#circleRecommendBtn').addEventListener('click', recommendInsideCircle);
+// 서클 반경이 이 값(km) 미만이면 스팟을 작은 초록 점으로 간략 표시 (핀이 많아질 때 겹침 방지)
+const SMALL_CIRCLE_KM = 0.4;
+function isSmallCircle() { return !!state.circle && pxToKm(state.circle.r) < SMALL_CIRCLE_KM; }
+
 function applyCircleFilter() {
+  const dotMode = isSmallCircle();
   Object.values(state.spots).forEach(spot => {
     const m = markers[spot.id]; if (!m) return;
-    const show = gradeFilter[spot.grade] && (!state.circle || insideCircle(spot));
+    // 스팟은 서클이 켜져 있고, 그 안에 있을 때만 노출 (서클 없으면 항상 숨김 — 핀이 많아져도 지도가 안 뒤덮이도록)
+    const show = gradeFilter[spot.grade] && state.circle && insideCircle(spot);
     const el = m.getElement(); if (el) el.style.display = show ? '' : 'none';
+    m.setIcon(dotMode ? makeDotIcon() : makeGradeIcon(spot.grade));
   });
   Object.values(state.vehicles).forEach(v => {
     const m = vehicleMarkers[v.id]; if (!m) return;
@@ -1130,13 +1148,17 @@ function drawMyLocMarker() {
   if (!state.myLocation || !state.imgW) return;
   myLocMarker = L.marker([state.myLocation.lat, state.myLocation.lng], { icon:makeMyLocIcon(), draggable:true, zIndexOffset:1200 }).addTo(myLocLayer);
   bindHoverCard(myLocMarker, () => `<div class="hc-head"><span style="font-size:16px">😀</span><span class="hc-name">내 위치</span></div>
-    <div class="hc-empty">드래그: 이동 · 🧹 지우개: 삭제</div>`);
-  myLocMarker.on('dragend', () => { const ll = myLocMarker.getLatLng(); state.myLocation = {lat:ll.lat,lng:ll.lng}; saveTactical(); });
-  myLocMarker.on('click', e => {
-    if (mode !== 'eraser') return;
+    <div class="hc-empty">드래그: 이동 · 더블클릭: 삭제</div>`);
+  myLocMarker.on('dragend', () => {
+    const ll = myLocMarker.getLatLng(); state.myLocation = {lat:ll.lat,lng:ll.lng}; saveTactical();
+    if (state.circle) recommendInsideCircle(true);
+  });
+  myLocMarker.on('dblclick', e => {
     L.DomEvent.stopPropagation(e);
+    hideHoverCard();
     state.myLocation = null; removeMyLocMarker(); saveTactical();
-    toast('🧹 내 위치 삭제됨');
+    clearCircleRecommend();
+    toast('🗑 내 위치 삭제됨');
   });
 }
 
@@ -1153,11 +1175,11 @@ function drawDestMarker() {
     <div class="hc-empty">드래그하면 추천이 갱신됩니다</div>`, 'dest');
   destMarker.on('drag', () => { const ll = destMarker.getLatLng(); state.destination = {lat:ll.lat,lng:ll.lng}; drawDestRecommendLine(false); });
   destMarker.on('dragend', () => { saveTactical(); computeDestinationRecommendation(); });
-  destMarker.on('click', e => {
-    if (mode !== 'eraser') return;
+  destMarker.on('dblclick', e => {
     L.DomEvent.stopPropagation(e);
+    hideHoverCard();
     state.destination = null; removeDestMarker(); saveTactical();
-    toast('🧹 목적지 삭제됨');
+    toast('🗑 목적지 삭제됨');
   });
   computeDestinationRecommendation();
 }
@@ -1290,13 +1312,12 @@ $$('.strategy-btn').forEach(b => b.addEventListener('click', () => {
 
 // ---------- 모드/클릭 ----------
 const HINTS = {
-  vehicle:'차가 고정으로 젠 되는 위치를 클릭하세요 (드래그 이동)',
-  flight:'비행선 시작점 → 끝점 순서로 2번 클릭하세요',
-  line:'색상을 고르고 시작점 → 끝점 순서로 2번 클릭하세요',
-  enemy:'적을 목격한 위치를 클릭하세요',
-  myloc:'내 위치를 클릭하세요 (드래그로 이동 가능, 1개만 유지됨)',
-  dest:'가려는 목적지를 클릭하세요 — 근처 최적 스팟을 자동 추천합니다',
-  eraser:'🧹 삭제하고 싶은 핀이나 선을 클릭하세요 (스팟/차량/선/비행선/적표시/내위치/목적지 전부 가능)'
+  vehicle:'차가 고정으로 젠 되는 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
+  flight:'비행선 시작점 → 끝점 순서로 2번 클릭하세요 (더블클릭으로 삭제)',
+  line:'색상을 고르고 시작점 → 끝점 순서로 2번 클릭하세요 (몸통 드래그 이동, 더블클릭 삭제)',
+  enemy:'적을 목격한 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
+  myloc:'내 위치를 클릭하세요 (드래그로 이동, 1개만 유지 · 더블클릭 삭제)',
+  dest:'가려는 목적지를 클릭하세요 — 근처 최적 스팟을 자동 추천합니다 (더블클릭 삭제)'
 };
 function setMode(m) {
   mode = m;
@@ -1304,8 +1325,7 @@ function setMode(m) {
   if (flightTempMarker) { flightGroup.removeLayer(flightTempMarker); flightTempMarker = null; }
   if (lineTempMarker) { lineLayer.removeLayer(lineTempMarker); lineTempMarker = null; }
   $$('.mode-btn[data-mode]').forEach(b => {
-    b.classList.toggle('active', b.dataset.mode === m && m !== 'eraser');
-    b.classList.toggle('eraser-active', b.dataset.mode === m && m === 'eraser');
+    b.classList.toggle('active', b.dataset.mode === m);
   });
   $('#lineColorBar').style.display = (m === 'line') ? 'flex' : 'none';
   const hint = $('#modeHint');
@@ -1337,7 +1357,7 @@ $$('.mode-btn[data-mode]').forEach(b => {
 // ---------- 더블클릭 = 구글맵 스타일 "여기에 스팟 추가" 팝업 ----------
 function onMapDoubleClick(e) {
   if (!state.imgW) return;
-  if (mode) { toast('다른 도구가 선택되어 있어요. 지우개/차량 등 도구를 끄면(같은 버튼 다시 클릭) 더블클릭으로 스팟을 추가할 수 있어요.'); return; }
+  if (mode) { toast('다른 도구가 선택되어 있어요. 같은 버튼을 다시 클릭해 도구를 끄면 더블클릭으로 스팟을 추가할 수 있어요.'); return; }
   const latlng = e.latlng;
   const wrap = document.createElement('div');
   wrap.innerHTML = `<button id="addSpotHereBtn" style="
@@ -1357,7 +1377,6 @@ function onMapDoubleClick(e) {
 
 function onMapClick(e) {
   if (!state.imgW) return;
-  if (mode === 'eraser') return; // 지우개 모드는 개별 마커 클릭으로만 동작 (빈 곳 클릭은 무시)
   if (mode === 'vehicle') {
     const v = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng };
     writeVehicle(v);
@@ -1407,7 +1426,7 @@ $('#resetFab').addEventListener('click', () => {
   if (!confirm('비행선 · 선긋기 · 적 표시 · 내 위치 · 목적지를 전부 초기화할까요?\n(스팟/차량 핀은 그대로 유지됩니다)')) return;
   state.flight = null; state.circle = null; state.enemies = {}; state.myLocation = null; state.destination = null;
   removeFlightLayer(); removeCircleLayers(); clearRouteLayers();
-  rebuildEnemyMarkers(); removeMyLocMarker(); removeDestMarker();
+  rebuildEnemyMarkers(); removeMyLocMarker(); removeDestMarker(); clearCircleRecommend();
   $('#routePanel').style.display = 'none';
   flightFirstPoint = null; lineFirstPoint = null;
   if (flightTempMarker) { flightGroup.removeLayer(flightTempMarker); flightTempMarker = null; }
@@ -1500,7 +1519,7 @@ $('#clearAllBtn').addEventListener('click', () => {
   rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers();
   if (isShared()) mapRef.remove(); else saveSharedData();
   state.flight = null; state.circle = null; state.enemies = {}; state.myLocation = null; state.destination = null;
-  removeFlightLayer(); removeCircleLayers(); clearRouteLayers(); rebuildEnemyMarkers(); removeMyLocMarker(); removeDestMarker();
+  removeFlightLayer(); removeCircleLayers(); clearRouteLayers(); rebuildEnemyMarkers(); removeMyLocMarker(); removeDestMarker(); clearCircleRecommend();
   $('#routePanel').style.display = 'none';
   saveTactical();
   toast('삭제 완료');
