@@ -196,27 +196,31 @@ const DELETE_PASSWORD = "1124";
   }
   .dest-pin span { transform:rotate(45deg); font-size:14px; }
 
-  .leaflet-tooltip.spot-tooltip {
-    background:rgba(20,20,22,.97); border:1px solid var(--accent);
-    border-radius:8px; color:var(--text); padding:10px 13px;
-    box-shadow:0 4px 16px rgba(0,0,0,.6);
-    min-width:180px; max-width:300px;
-    white-space:normal; word-break:keep-all; overflow-wrap:break-word;
+  /* ===== 커스텀 호버 카드 (Leaflet 툴팁 미사용 — CSS 충돌/세로 줄바꿈 문제 원천 차단) ===== */
+  #hoverCard {
+    position:fixed; z-index:5500; pointer-events:none;
+    background:rgba(18,18,20,.98); border:1px solid var(--accent); border-radius:9px;
+    padding:11px 14px; box-shadow:0 6px 22px rgba(0,0,0,.65);
+    min-width:210px; max-width:320px; display:none;
   }
-  .leaflet-tooltip.spot-tooltip::before { display:none; }
-  .leaflet-tooltip.vehicle-tooltip { border-color:var(--vehicle); }
-  .leaflet-tooltip.dest-tooltip { border-color:var(--dest); }
-  .tt-head { display:flex; align-items:center; gap:7px; margin-bottom:6px; white-space:nowrap; }
-  .tt-grade {
-    width:22px; height:22px; min-width:22px; border-radius:50%;
-    display:inline-flex; align-items:center; justify-content:center;
-    font-weight:800; font-size:12px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);
+  #hoverCard, #hoverCard * {
+    white-space:normal !important; word-break:keep-all !important; overflow-wrap:break-word !important;
+    line-break:strict; box-sizing:border-box;
   }
-  .tt-name { font-weight:700; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
-  .tt-pc-row { display:flex; gap:12px; }
-  .tt-pc { flex:1; min-width:0; font-size:11px; color:#c8c8cc; line-height:1.5; word-break:keep-all; }
-  .tt-pc b { color:#fff; display:block; margin-bottom:1px; }
-  .tt-edit-hint { font-size:10px; color:var(--text-dim); margin-top:6px; white-space:nowrap; }
+  #hoverCard.vehicle { border-color:var(--vehicle); }
+  #hoverCard.dest { border-color:var(--dest); }
+  #hoverCard .hc-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  #hoverCard .hc-grade {
+    width:24px; height:24px; min-width:24px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:13px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);
+  }
+  #hoverCard .hc-name { font-weight:700; font-size:14px; color:var(--text); }
+  #hoverCard .hc-row { display:flex; gap:14px; }
+  #hoverCard .hc-col { flex:1; min-width:0; }
+  #hoverCard .hc-col b { display:block; font-size:11px; color:#fff; margin-bottom:2px; }
+  #hoverCard .hc-col span { font-size:11.5px; color:#c8c8cc; line-height:1.5; }
+  #hoverCard .hc-empty { font-size:11.5px; color:var(--text-dim); }
 
   .add-spot-popup .leaflet-popup-content-wrapper {
     background:rgba(20,20,22,.97); border:1px solid var(--accent); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.6);
@@ -303,7 +307,16 @@ const DELETE_PASSWORD = "1124";
   .toggle-switch.on::after { transform:translateX(17px); background:#2ecc71; }
   #settingsCloseBtn { margin-top:14px; width:100%; }
 
-  #toast {
+  #resetFab {
+    position:absolute; bottom:16px; right:16px; z-index:900;
+    background:rgba(231,76,60,.16); border:1.5px solid var(--danger); color:#ff8a80;
+    border-radius:10px; padding:11px 16px; font-size:13px; font-weight:700;
+    cursor:pointer; font-family:inherit; box-shadow:0 4px 16px rgba(0,0,0,.5);
+    transition:background .15s, transform .1s;
+  }
+  #resetFab:hover { background:rgba(231,76,60,.28); transform:translateY(-1px); }
+  #resetFab:active { transform:translateY(0); }
+
     position:fixed; bottom:24px; left:50%;
     transform:translateX(-50%) translateY(80px);
     background:var(--bg-card); border:1px solid var(--accent); color:var(--text);
@@ -350,10 +363,11 @@ const DELETE_PASSWORD = "1124";
   <div id="sidebarSpacer"></div>
   <div id="sidebarFooter">
     🖱 지도 <b style="color:var(--accent)">더블클릭</b> = 스팟 추가 버튼 노출<br>
-    📍 스팟 클릭 = 수정 · 🧹 지우개 = 모든 핀/선 삭제<br>
-    ➖ 선은 몸통을 드래그하면 통째로 이동됩니다<br>
+    📍 스팟은 <b style="color:var(--accent)">마우스만 올려도</b> 장단점이 바로 보여요<br>
+    🧹 지우개 = 모든 핀/선 삭제 · ➖ 선은 몸통 드래그로 이동<br>
     ⭐ 툴바 버튼 <b style="color:var(--accent)">더블클릭</b> = 그 항목 지도 표시 on/off<br>
-    ⭕ 서클 배치 시 내부 핀만 표시됩니다
+    ⭕ 서클 배치 시 내부 핀만 표시 · 😀+⭕ 둘 다 있으면<br>우측하단 아래 <b style="color:var(--accent)">🧭 서클 내 최적 이동</b>으로 추천<br>
+    🔄 리셋(우측 하단)은 스팟·차량은 그대로 두고<br>비행선·선·적표시·내위치·목적지만 초기화
   </div>
 </aside>
 
@@ -371,9 +385,9 @@ const DELETE_PASSWORD = "1124";
     <div class="toolbar-sep"></div>
     <button class="mode-btn" data-mode="eraser">🧹 지우개</button>
     <button class="mode-btn action" id="circleBtn">⭕ 서클</button>
+    <button class="mode-btn action" id="circleRecommendBtn">🧭 서클 내 최적 이동</button>
     <div class="toolbar-sep"></div>
-    <button class="mode-btn action" id="recommendBtn">🧭 추천 경로</button>
-    <button class="mode-btn action" id="newMatchBtn">🔄 새 판</button>
+    <button class="mode-btn action" id="recommendBtn">🧭 비행선 경로 추천</button>
   </div>
   <div id="modeHint"></div>
   <div id="lineColorBar">
@@ -394,6 +408,8 @@ const DELETE_PASSWORD = "1124";
     <div id="routeList"></div>
     <div id="routeNote">🛡 안전 우선: 비행선에서 먼 스팟 = 경합 확률↓ · ⭕ 서클: 서클 내부 스팟 우선</div>
   </div>
+
+  <button id="resetFab" title="비행선/선긋기/적표시/내위치/목적지 초기화">🔄 리셋</button>
 </main>
 
 <div id="modalBackdrop">
@@ -419,6 +435,8 @@ const DELETE_PASSWORD = "1124";
     <button class="btn btn-accent" id="settingsCloseBtn">닫기</button>
   </div>
 </div>
+
+<div id="hoverCard"></div>
 
 <div id="toast"></div>
 
@@ -851,28 +869,56 @@ const makeEnemyIcon = () => L.divIcon({ className:'', html:`<div class="enemy-pi
 const makeMyLocIcon = () => L.divIcon({ className:'', html:`<div class="myloc-pin">😀</div>`, iconSize:[26,26], iconAnchor:[13,13] });
 const makeDestIcon = () => L.divIcon({ className:'', html:`<div class="dest-pin"><span>🏁</span></div>`, iconSize:[30,30], iconAnchor:[15,28] });
 
+// ---------- 커스텀 호버 카드 (Leaflet 툴팁 대신 사용 — 가로 배치 고정, CSS 충돌 없음) ----------
+function showHoverCard(html, clientX, clientY, extraClass) {
+  const card = $('#hoverCard');
+  card.className = extraClass || '';
+  card.innerHTML = html;
+  card.style.display = 'block';
+  card.style.left = (clientX + 16) + 'px';
+  card.style.top = (clientY + 16) + 'px';
+  requestAnimationFrame(() => {
+    const rect = card.getBoundingClientRect();
+    let left = clientX + 16, top = clientY + 16;
+    if (rect.right > window.innerWidth - 8) left = clientX - rect.width - 16;
+    if (rect.bottom > window.innerHeight - 8) top = clientY - rect.height - 16;
+    card.style.left = Math.max(8, left) + 'px';
+    card.style.top = Math.max(8, top) + 'px';
+  });
+}
+function hideHoverCard() { $('#hoverCard').style.display = 'none'; }
+function bindHoverCard(layer, htmlFn, extraClass) {
+  layer.on('mouseover', (e) => showHoverCard(typeof htmlFn === 'function' ? htmlFn() : htmlFn, e.originalEvent.clientX, e.originalEvent.clientY, extraClass));
+  layer.on('mousemove', (e) => {
+    const card = $('#hoverCard');
+    if (card.style.display === 'block') { card.style.left = (e.originalEvent.clientX + 16) + 'px'; card.style.top = (e.originalEvent.clientY + 16) + 'px'; }
+  });
+  layer.on('mouseout', hideHoverCard);
+  layer.on('dragstart', hideHoverCard);
+}
+
 function spotTooltipHtml(spot) {
   const c = GRADE_COLORS[spot.grade]||'#888';
   const hasPros = !!spot.pros, hasCons = !!spot.cons;
   let body;
   if (!hasPros && !hasCons) {
-    body = '<div class="tt-pc">메모 없음</div>';
+    body = '<div class="hc-empty">메모 없음</div>';
   } else {
-    body = `<div class="tt-pc-row">
-      ${hasPros ? `<div class="tt-pc"><b>👍 장점</b>${escapeHtml(spot.pros)}</div>` : ''}
-      ${hasCons ? `<div class="tt-pc"><b>👎 단점</b>${escapeHtml(spot.cons)}</div>` : ''}
+    body = `<div class="hc-row">
+      ${hasPros ? `<div class="hc-col"><b>👍 장점</b><span>${escapeHtml(spot.pros)}</span></div>` : ''}
+      ${hasCons ? `<div class="hc-col"><b>👎 단점</b><span>${escapeHtml(spot.cons)}</span></div>` : ''}
     </div>`;
   }
-  return `<div class="tt-head"><span class="tt-grade" style="background:${c}">${spot.grade}</span>
-    <span class="tt-name">${escapeHtml(spot.name)||'(이름 없음)'}</span></div>
-    ${body}
-    <div class="tt-edit-hint">✏️ 클릭=수정 · 🧹 지우개=삭제</div>`;
+  return `<div class="hc-head"><span class="hc-grade" style="background:${c}">${spot.grade}</span>
+    <span class="hc-name">${escapeHtml(spot.name)||'(이름 없음)'}</span></div>
+    ${body}`;
 }
 function addSpotMarker(spot) {
   const m = L.marker([spot.lat, spot.lng], { icon:makeGradeIcon(spot.grade), riseOnHover:true }).addTo(spotLayer);
-  m.bindTooltip(spotTooltipHtml(spot), { className:'spot-tooltip', direction:'top', offset:[0,-18], opacity:1 });
+  bindHoverCard(m, () => spotTooltipHtml(spot));
   m.on('click', (e) => {
     L.DomEvent.stopPropagation(e);
+    hideHoverCard();
     if (mode === 'eraser') { deleteSpot(spot.id); toast('🧹 스팟 삭제됨'); return; }
     openEditModal(spot);
   });
@@ -880,15 +926,13 @@ function addSpotMarker(spot) {
 }
 function addVehicleMarker(v) {
   const m = L.marker([v.lat, v.lng], { icon:makeVehicleIcon(), riseOnHover:true, draggable:true }).addTo(vehicleLayer);
-  m.bindTooltip(
-    `<div class="tt-head"><span style="font-size:15px">🚗</span><span class="tt-name">고정 차량 스폰</span></div>
-     <div class="tt-pc">드래그: 위치 조정 · 🧹 지우개 클릭: 삭제</div>`,
-    { className:'spot-tooltip vehicle-tooltip', direction:'top', offset:[0,-16], opacity:1 }
-  );
+  bindHoverCard(m, () => `<div class="hc-head"><span style="font-size:16px">🚗</span><span class="hc-name">고정 차량 스폰</span></div>
+     <div class="hc-empty">드래그: 위치 조정 · 🧹 지우개: 삭제</div>`, 'vehicle');
   m.on('dragend', () => { const ll = m.getLatLng(); v.lat=ll.lat; v.lng=ll.lng; writeVehicle(v); });
   m.on('click', (e) => {
     if (mode !== 'eraser') return;
     L.DomEvent.stopPropagation(e);
+    hideHoverCard();
     deleteVehicle(v.id);
     toast('🧹 차량 스폰 삭제됨');
   });
@@ -896,10 +940,12 @@ function addVehicleMarker(v) {
 }
 function addEnemyMarker(en) {
   const m = L.marker([en.lat, en.lng], { icon:makeEnemyIcon(), riseOnHover:true }).addTo(enemyLayer);
-  m.bindTooltip('🔴 적 목격 위치 (🧹 지우개 클릭 시 삭제)', { className:'spot-tooltip', direction:'top', offset:[0,-12] });
+  bindHoverCard(m, () => `<div class="hc-head"><span style="font-size:16px">🔴</span><span class="hc-name">적 목격 위치</span></div>
+    <div class="hc-empty">🧹 지우개 클릭 시 삭제</div>`);
   m.on('click', (e) => {
     if (mode !== 'eraser') return;
     L.DomEvent.stopPropagation(e);
+    hideHoverCard();
     delete state.enemies[en.id];
     enemyLayer.removeLayer(m); delete enemyMarkers[en.id];
     saveTactical();
@@ -1034,6 +1080,36 @@ $('#circleBtn').addEventListener('click', () => {
   }
 });
 const insideCircle = p => state.circle && distPx(p, state.circle) <= state.circle.r;
+
+// ---------- 서클 안에서 내 위치 기준 최적 이동 추천 (적 표시 회피) ----------
+let circleRecoLine = null, circleRecoMarker = null;
+function clearCircleRecommend() {
+  if (circleRecoLine) { map.removeLayer(circleRecoLine); circleRecoLine = null; }
+  if (circleRecoMarker) { map.removeLayer(circleRecoMarker); circleRecoMarker = null; }
+}
+function recommendInsideCircle() {
+  if (!state.imgW) return;
+  if (!state.circle) { toast('⭕ 먼저 서클을 배치해주세요'); return; }
+  if (!state.myLocation) { toast('😀 먼저 내 위치를 찍어주세요'); return; }
+  clearCircleRecommend();
+  const result = pickBestSpot(state.myLocation, { requireInsideCircle: true });
+  if (!result.spot) { toast('⭕ 서클 안에 등록된 스팟이 없어요'); return; }
+
+  circleRecoLine = L.polyline([[state.myLocation.lat,state.myLocation.lng],[result.spot.lat,result.spot.lng]], {
+    color:'#18ffff', weight:4, dashArray:'2 8', opacity:.95
+  }).addTo(map);
+  circleRecoMarker = L.marker([result.spot.lat, result.spot.lng], {
+    icon: L.divIcon({ className:'', html:`<div class="jump-pin" style="background:#18ffff;color:#003;">🎯</div>`, iconSize:[30,30], iconAnchor:[15,15] })
+  }).addTo(map);
+
+  const km = fmtKm(distPx(state.myLocation, result.spot));
+  const warn = result.allDangerous
+    ? ' ⚠️ 서클 안 스팟 전부 적 표시 있음! 신중하게 이동하세요'
+    : (result.avoidedEnemy ? ' 🛡 적 표시 지역은 피해서 추천했어요' : '');
+  toast(`🧭 [${result.spot.grade}] ${result.spot.name}로 이동 추천 (${km})${warn}`, 4500);
+  map.fitBounds(L.latLngBounds([[state.myLocation.lat,state.myLocation.lng],[result.spot.lat,result.spot.lng]]).pad(0.35));
+}
+$('#circleRecommendBtn').addEventListener('click', recommendInsideCircle);
 function applyCircleFilter() {
   Object.values(state.spots).forEach(spot => {
     const m = markers[spot.id]; if (!m) return;
@@ -1053,7 +1129,8 @@ function drawMyLocMarker() {
   removeMyLocMarker();
   if (!state.myLocation || !state.imgW) return;
   myLocMarker = L.marker([state.myLocation.lat, state.myLocation.lng], { icon:makeMyLocIcon(), draggable:true, zIndexOffset:1200 }).addTo(myLocLayer);
-  myLocMarker.bindTooltip('😀 내 위치 (드래그로 이동 · 🧹 지우개로 삭제)', { className:'spot-tooltip', direction:'top', offset:[0,-14] });
+  bindHoverCard(myLocMarker, () => `<div class="hc-head"><span style="font-size:16px">😀</span><span class="hc-name">내 위치</span></div>
+    <div class="hc-empty">드래그: 이동 · 🧹 지우개: 삭제</div>`);
   myLocMarker.on('dragend', () => { const ll = myLocMarker.getLatLng(); state.myLocation = {lat:ll.lat,lng:ll.lng}; saveTactical(); });
   myLocMarker.on('click', e => {
     if (mode !== 'eraser') return;
@@ -1072,7 +1149,8 @@ function drawDestMarker() {
   if (destMarker) { destLayer.removeLayer(destMarker); destMarker = null; }
   if (!state.destination || !state.imgW) return;
   destMarker = L.marker([state.destination.lat, state.destination.lng], { icon:makeDestIcon(), draggable:true, zIndexOffset:1200 }).addTo(destLayer);
-  destMarker.bindTooltip('🏁 목적지 (드래그하면 추천이 갱신됩니다)', { className:'spot-tooltip dest-tooltip', direction:'top', offset:[0,-18] });
+  bindHoverCard(destMarker, () => `<div class="hc-head"><span style="font-size:16px">🏁</span><span class="hc-name">목적지</span></div>
+    <div class="hc-empty">드래그하면 추천이 갱신됩니다</div>`, 'dest');
   destMarker.on('drag', () => { const ll = destMarker.getLatLng(); state.destination = {lat:ll.lat,lng:ll.lng}; drawDestRecommendLine(false); });
   destMarker.on('dragend', () => { saveTactical(); computeDestinationRecommendation(); });
   destMarker.on('click', e => {
@@ -1094,22 +1172,39 @@ function drawDestRecommendLine(withTooltip) {
     destRouteLine.bindTooltip(`🏁→📍 ${fmtKm(distPx(state.destination, lastRecommendedSpot))}`, { className:'spot-tooltip', sticky:true });
   }
 }
+const ENEMY_DANGER_KM = 0.18; // 이 거리(약 180m) 안에 적 표시가 있으면 위험 지역으로 간주하고 후보에서 제외
+
+// 공통 스팟 추천 로직: origin(기준점)에서 가장 좋은 스팟을 고르되, 근처에 적 표시가 있으면 피해서 다음 후보로
+function pickBestSpot(origin, { requireInsideCircle = false } = {}) {
+  const candidates = Object.values(state.spots).filter(s => gradeFilter[s.grade] && (!requireInsideCircle || insideCircle(s)));
+  if (!candidates.length) return { spot:null, avoidedEnemy:false, allDangerous:false };
+  const scored = candidates.map(spot => ({
+    spot,
+    km: pxToKm(distPx(origin, spot)),
+    score: GRADE_VALUE[spot.grade]*3 - pxToKm(distPx(origin, spot))*2.2
+  })).sort((a,b) => b.score - a.score);
+
+  const enemies = Object.values(state.enemies);
+  const isDangerous = (spot) => enemies.some(en => pxToKm(distPx(en, spot)) <= ENEMY_DANGER_KM);
+
+  let avoidedEnemy = false;
+  for (const c of scored) {
+    if (!isDangerous(c.spot)) return { spot:c.spot, km:c.km, avoidedEnemy, allDangerous:false };
+    avoidedEnemy = true;
+  }
+  // 전부 위험 지역이면 그나마 제일 점수 높은 곳을 경고와 함께 반환
+  return { spot:scored[0].spot, km:scored[0].km, avoidedEnemy:true, allDangerous:true };
+}
+
 function computeDestinationRecommendation() {
   if (!state.destination) return;
-  const candidates = Object.values(state.spots).filter(s => gradeFilter[s.grade] && (!state.circle || insideCircle(s)));
-  if (!candidates.length) { toast('📍 등록된 스팟이 없어 목적지 추천을 할 수 없어요'); lastRecommendedSpot = null; drawDestRecommendLine(false); return; }
-  let best = null, bestScore = -Infinity;
-  candidates.forEach(spot => {
-    const km = pxToKm(distPx(state.destination, spot));
-    const score = GRADE_VALUE[spot.grade]*3 - km*2.2;
-    if (score > bestScore) { bestScore = score; best = spot; }
-  });
-  lastRecommendedSpot = best;
+  const result = pickBestSpot(state.destination, { requireInsideCircle: !!state.circle });
+  if (!result.spot) { toast('📍 등록된 스팟이 없어 목적지 추천을 할 수 없어요'); lastRecommendedSpot = null; drawDestRecommendLine(false); return; }
+  lastRecommendedSpot = result.spot;
   drawDestRecommendLine(true);
-  if (best) {
-    const km = fmtKm(distPx(state.destination, best));
-    toast(`🏁 목적지 근처 추천: [${best.grade}] ${best.name} (${km})`, 3800);
-  }
+  const km = fmtKm(distPx(state.destination, result.spot));
+  const warn = result.allDangerous ? ' ⚠️ 근처 스팟 전부 적 표시 있음, 주의!' : (result.avoidedEnemy ? ' (적 표시 지역은 피해서 추천)' : '');
+  toast(`🏁 목적지 근처 추천: [${result.spot.grade}] ${result.spot.name} (${km})${warn}`, 4200);
 }
 
 // ---------- 추천 경로 (비행선+차량 기반) ----------
@@ -1308,17 +1403,22 @@ function onMapClick(e) {
     }
   }
 }
-$('#newMatchBtn').addEventListener('click', () => {
-  state.flight = null; state.circle = null; state.enemies = {};
+$('#resetFab').addEventListener('click', () => {
+  if (!confirm('비행선 · 선긋기 · 적 표시 · 내 위치 · 목적지를 전부 초기화할까요?\n(스팟/차량 핀은 그대로 유지됩니다)')) return;
+  state.flight = null; state.circle = null; state.enemies = {}; state.myLocation = null; state.destination = null;
   removeFlightLayer(); removeCircleLayers(); clearRouteLayers();
-  rebuildEnemyMarkers();
+  rebuildEnemyMarkers(); removeMyLocMarker(); removeDestMarker();
   $('#routePanel').style.display = 'none';
   flightFirstPoint = null; lineFirstPoint = null;
   if (flightTempMarker) { flightGroup.removeLayer(flightTempMarker); flightTempMarker = null; }
   if (lineTempMarker) { lineLayer.removeLayer(lineTempMarker); lineTempMarker = null; }
-  saveTactical();
+  // 선긋기(공유 데이터)도 전부 삭제
+  state.lines = {};
+  rebuildLineLayers();
+  if (isShared()) mapRef.child('lines').remove(); else saveSharedData();
   applyCircleFilter();
-  toast('🔄 새 판! 비행선/서클/적 표시 초기화 (스팟·차량·선·내위치·목적지는 유지)');
+  saveTactical();
+  toast('🔄 리셋 완료! 비행선·선긋기·적표시·내위치·목적지 초기화 (스팟·차량은 유지)');
 });
 
 // ---------- 스팟 추가/편집 모달 ----------
