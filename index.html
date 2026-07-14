@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PUBG 네비게이션 </title>
+<title>PUBG 스팟 메모 & 랭크 분석 v7</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.5/firebase-app-compat.min.js"></script>
@@ -95,6 +95,10 @@ const DELETE_PASSWORD = "1124";
   .btn-danger-outline { background:transparent; color:var(--danger); border:1px solid var(--danger); width:100%; margin-top:7px; }
   .btn-danger-outline:hover { background:rgba(231,76,60,.12); }
   .btn-outline { background:transparent; color:var(--text-dim); border:1px solid var(--border); width:100%; margin-top:7px; }
+  #adminBadge {
+    font-size:11px; color:#2ecc71; font-weight:700; margin-bottom:8px;
+    padding:6px 8px; background:rgba(46,204,113,.1); border:1px solid rgba(46,204,113,.35); border-radius:6px; text-align:center;
+  }
   .btn-outline:hover { color:var(--text); background:var(--bg-card); }
 
   .grade-filters { display:flex; gap:4px; flex-wrap:wrap; }
@@ -423,7 +427,18 @@ const DELETE_PASSWORD = "1124";
   <div class="panel-section">
     <button class="btn btn-accent" id="changeMapBtn">🗺 맵 변경</button>
     <button class="btn btn-outline" id="settingsBtn">🗂 레이어 표시 설정</button>
-    <button class="btn btn-danger-outline" id="clearAllBtn">🔒 이 맵 데이터 전체 삭제</button>
+  </div>
+
+  <div class="panel-section" id="adminSection">
+    <button class="btn btn-outline" id="adminEnterBtn">🔑 관리자 모드</button>
+    <div id="adminPanel" style="display:none;">
+      <div id="adminBadge">🔓 관리자 모드 활성화됨</div>
+      <button class="btn btn-outline" id="backupBtn">💾 백업 파일로 저장</button>
+      <button class="btn btn-outline" id="restoreBtn">📂 백업 파일로 복원</button>
+      <input type="file" id="restoreFileInput" accept="application/json,.json" style="display:none;">
+      <button class="btn btn-danger-outline" id="clearAllBtn">🔒 이 맵 데이터 전체 삭제</button>
+      <button class="btn btn-outline" id="adminExitBtn">🔓 관리자 모드 종료</button>
+    </div>
   </div>
 
   <div class="panel-section">
@@ -701,9 +716,12 @@ function writeSpot(spot) {
   if (isShared()) mapRef.child('spots/'+spot.id).set(spot); else saveSharedData();
 }
 function deleteSpot(id) {
+  if (!canDelete()) { blockedDeleteToast(); return false; }
+  recordDelete();
   delete state.spots[id];
   if (markers[id]) { spotLayer.removeLayer(markers[id]); delete markers[id]; }
   if (isShared()) mapRef.child('spots/'+id).remove(); else saveSharedData();
+  return true;
 }
 function writeVehicle(v) {
   state.vehicles[v.id] = v;
@@ -713,9 +731,12 @@ function writeVehicle(v) {
   if (isShared()) mapRef.child('vehicles/'+v.id).set(v); else saveSharedData();
 }
 function deleteVehicle(id) {
+  if (!canDelete()) { blockedDeleteToast(); return false; }
+  recordDelete();
   delete state.vehicles[id];
   if (vehicleMarkers[id]) { vehicleLayer.removeLayer(vehicleMarkers[id]); delete vehicleMarkers[id]; }
   if (isShared()) mapRef.child('vehicles/'+id).remove(); else saveSharedData();
+  return true;
 }
 function writeSecretRoom(sr) {
   state.secretRooms[sr.id] = sr;
@@ -724,9 +745,12 @@ function writeSecretRoom(sr) {
   if (isShared()) mapRef.child('secretRooms/'+sr.id).set(sr); else saveSharedData();
 }
 function deleteSecretRoom(id) {
+  if (!canDelete()) { blockedDeleteToast(); return false; }
+  recordDelete();
   delete state.secretRooms[id];
   if (secretMarkers[id]) { secretLayer.removeLayer(secretMarkers[id]); delete secretMarkers[id]; }
   if (isShared()) mapRef.child('secretRooms/'+id).remove(); else saveSharedData();
+  return true;
 }
 function writeLine(line) {
   state.lines[line.id] = line;
@@ -737,6 +761,7 @@ function deleteLine(id) {
   delete state.lines[id];
   removeLineLayer(id);
   if (isShared()) mapRef.child('lines/'+id).remove(); else saveSharedData();
+  return true;
 }
 function writeTeamLoc(slot, loc) {
   state.team[slot] = loc;
@@ -748,6 +773,7 @@ function deleteTeamLoc(slot) {
   delete state.team[slot];
   if (teamMarkers[slot]) { teamLayer.removeLayer(teamMarkers[slot]); delete teamMarkers[slot]; }
   if (isShared()) mapRef.child('team/'+slot).remove(); else saveSharedData();
+  return true;
 }
 function writeLabel(label) {
   state.labels[label.id] = label;
@@ -756,9 +782,12 @@ function writeLabel(label) {
   if (isShared()) mapRef.child('labels/'+label.id).set(label); else saveSharedData();
 }
 function deleteLabelItem(id) {
+  if (!canDelete()) { blockedDeleteToast(); return false; }
+  recordDelete();
   delete state.labels[id];
   if (labelMarkers[id]) { labelLayer.removeLayer(labelMarkers[id]); delete labelMarkers[id]; }
   if (isShared()) mapRef.child('labels/'+id).remove(); else saveSharedData();
+  return true;
 }
 
 function subscribeMap() {
@@ -1085,8 +1114,7 @@ function addSpotMarker(spot) {
     L.DomEvent.stopPropagation(e);
     hideHoverCard();
     hideDangerPreview();
-    deleteSpot(spot.id);
-    toast('🗑 스팟 삭제됨');
+    if (deleteSpot(spot.id)) toast('🗑 스팟 삭제됨');
   });
   markers[spot.id] = m;
 }
@@ -1098,8 +1126,7 @@ function addVehicleMarker(v) {
   m.on('dblclick', (e) => {
     L.DomEvent.stopPropagation(e);
     hideHoverCard();
-    deleteVehicle(v.id);
-    toast('🗑 차량 스폰 삭제됨');
+    if (deleteVehicle(v.id)) toast('🗑 차량 스폰 삭제됨');
   });
   vehicleMarkers[v.id] = m;
 }
@@ -1111,8 +1138,7 @@ function addSecretRoomMarker(sr) {
   m.on('dblclick', (e) => {
     L.DomEvent.stopPropagation(e);
     hideHoverCard();
-    deleteSecretRoom(sr.id);
-    toast('🗑 비밀의 방 삭제됨');
+    if (deleteSecretRoom(sr.id)) toast('🗑 비밀의 방 삭제됨');
   });
   secretMarkers[sr.id] = m;
 }
@@ -1172,8 +1198,7 @@ function addLineLayer(line) {
 
   const eraseLine = (e) => {
     L.DomEvent.stopPropagation(e);
-    deleteLine(line.id);
-    toast('🗑 선 삭제됨');
+    if (deleteLine(line.id)) toast('🗑 선 삭제됨');
   };
   hit.on('dblclick', eraseLine);
   h1.on('dblclick', eraseLine);
@@ -1297,8 +1322,7 @@ function addTeamMarker(slot, loc) {
   m.on('dblclick', e => {
     L.DomEvent.stopPropagation(e);
     hideHoverCard();
-    deleteTeamLoc(slot);
-    toast(`🗑 팀원 ${slot}번 위치 삭제됨`);
+    if (deleteTeamLoc(slot)) toast(`🗑 팀원 ${slot}번 위치 삭제됨`);
     syncTeamSlotBar();
   });
   teamMarkers[slot] = m;
@@ -1336,8 +1360,7 @@ function addLabelMarker(label) {
   });
   m.on('dblclick', e => {
     L.DomEvent.stopPropagation(e);
-    deleteLabelItem(label.id);
-    toast('🗑 지명 삭제됨');
+    if (deleteLabelItem(label.id)) toast('🗑 지명 삭제됨');
   });
   labelMarkers[label.id] = m;
 }
@@ -1694,9 +1717,10 @@ $('#saveBtn').addEventListener('click', () => {
 $('#modalDeleteBtn').addEventListener('click', () => {
   if (!editingSpotId) return;
   if (!confirm('이 스팟을 삭제할까요?')) return;
-  deleteSpot(editingSpotId);
-  closeModal();
-  toast('🗑 스팟 삭제됨');
+  if (deleteSpot(editingSpotId)) {
+    closeModal();
+    toast('🗑 스팟 삭제됨');
+  }
 });
 $('#modalDangerBtn').addEventListener('click', () => {
   const spotId = editingSpotId;
@@ -1708,11 +1732,88 @@ $('#modalDangerBtn').addEventListener('click', () => {
 $('#spotNameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveBtn').click(); });
 
 // ---------- 전체 삭제 (비밀번호 보호) ----------
-$('#clearAllBtn').addEventListener('click', () => {
-  if (!state.mapKey) return;
-  const pw = prompt('🔒 전체 삭제 비밀번호를 입력하세요');
+// ---------- 관리자 모드 ----------
+const ADMIN_KEY = 'pubg_v_admin_mode';
+function isAdminMode() { return localStorage.getItem(ADMIN_KEY) === '1'; }
+function setAdminMode(on) {
+  if (on) localStorage.setItem(ADMIN_KEY, '1'); else localStorage.removeItem(ADMIN_KEY);
+  syncAdminUI();
+}
+function syncAdminUI() {
+  const admin = isAdminMode();
+  $('#adminEnterBtn').style.display = admin ? 'none' : 'inline-flex';
+  $('#adminPanel').style.display = admin ? 'block' : 'none';
+}
+$('#adminEnterBtn').addEventListener('click', () => {
+  const pw = prompt('🔑 관리자 비밀번호를 입력하세요');
   if (pw === null) return;
   if (pw !== DELETE_PASSWORD) { toast('❌ 비밀번호가 틀렸습니다'); return; }
+  setAdminMode(true);
+  toast('🔓 관리자 모드 활성화됨 — 백업/복원/전체삭제를 쓸 수 있어요');
+});
+$('#adminExitBtn').addEventListener('click', () => {
+  setAdminMode(false);
+  toast('관리자 모드를 종료했습니다');
+});
+
+// ---------- 일반 유저 삭제 한도 (관리자는 무제한) ----------
+const DELETE_LIMIT = 10;
+const DELETE_COUNT_KEY = 'pubg_v_delete_count';
+function getDeleteCount() { return parseInt(localStorage.getItem(DELETE_COUNT_KEY) || '0', 10); }
+function canDelete() { return isAdminMode() || getDeleteCount() < DELETE_LIMIT; }
+function recordDelete() {
+  if (isAdminMode()) return;
+  const c = getDeleteCount() + 1;
+  localStorage.setItem(DELETE_COUNT_KEY, String(c));
+  if (c === DELETE_LIMIT) toast(`⚠️ 삭제 ${DELETE_LIMIT}개를 모두 사용했습니다. 더 삭제하려면 관리자 모드가 필요해요.`, 4200);
+}
+function blockedDeleteToast() { toast(`🚫 삭제는 최대 ${DELETE_LIMIT}개까지만 가능해요 (관리자 모드에서는 무제한)`, 3800); }
+
+// ---------- 백업 다운로드 / 복원 (관리자 전용) ----------
+$('#backupBtn').addEventListener('click', () => {
+  if (!state.mapKey) { toast('먼저 맵을 선택해주세요'); return; }
+  const data = {
+    exportedAt: new Date().toISOString(), mapKey: state.mapKey, mapLabel: state.mapLabel,
+    spots: state.spots, vehicles: state.vehicles, lines: state.lines,
+    team: state.team, labels: state.labels, secretRooms: state.secretRooms
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const ts = new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+  const a = document.createElement('a');
+  a.href = url; a.download = `pubg-spot-backup-${state.mapLabel}-${ts}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('💾 백업 파일이 다운로드됐어요');
+});
+$('#restoreBtn').addEventListener('click', () => $('#restoreFileInput').click());
+$('#restoreFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data || typeof data !== 'object') throw new Error('invalid backup file');
+    if (!confirm(`이 백업 파일로 [${state.mapLabel}] 맵의 현재 데이터를 덮어씁니다.\n⚠️ 지금 저장된 모든 데이터가 백업 시점 상태로 교체됩니다 (모든 사용자에게 반영)! 계속할까요?`)) return;
+    const restored = {
+      spots: data.spots || {}, vehicles: data.vehicles || {}, lines: data.lines || {},
+      team: data.team || {}, labels: data.labels || {}, secretRooms: data.secretRooms || {}
+    };
+    state.spots = restored.spots; state.vehicles = restored.vehicles; state.lines = restored.lines;
+    state.team = restored.team; state.labels = restored.labels; state.secretRooms = restored.secretRooms;
+    rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers(); rebuildSecretRoomMarkers();
+    applyCircleFilter();
+    if (isShared()) mapRef.set(restored); else saveSharedData();
+    toast('✅ 백업 복원 완료!');
+  } catch (err) {
+    toast('❌ 올바른 백업 파일이 아니에요');
+  }
+});
+
+$('#clearAllBtn').addEventListener('click', () => {
+  if (!state.mapKey) return;
+  if (!isAdminMode()) { toast('🔑 관리자 모드에서만 사용할 수 있어요'); return; }
   const msg = isShared()
     ? `[${state.mapLabel}] 맵의 공유 데이터(스팟/차량/선)를 전부 삭제합니다.\n⚠️ 모든 사용자에게서 삭제됩니다! 계속할까요?`
     : `[${state.mapLabel}] 맵의 내 데이터를 전부 삭제할까요?`;
@@ -1736,6 +1837,7 @@ $('#clearAllBtn').addEventListener('click', () => {
   applyLayerVisibility();
   syncToolbarLayerButtons();
   buildGradeFilters();
+  syncAdminUI();
   await buildSelectGrid();
 })();
 </script>
