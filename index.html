@@ -164,6 +164,31 @@ const DELETE_PASSWORD = "1124";
   .team-slot-dot.selected { border-color:#fff; transform:scale(1.15); }
   .team-slot-dot.taken::after { content:'✓'; position:absolute; margin-left:16px; margin-top:-18px; font-size:11px; }
 
+  #labelTypeBar {
+    position:absolute; top:62px; left:50%; transform:translateX(-50%);
+    z-index:900; display:none; gap:6px;
+    background:rgba(20,20,22,.92); border:1px solid var(--border);
+    border-radius:10px; padding:6px 8px; box-shadow:0 4px 16px rgba(0,0,0,.5);
+  }
+  .label-type-btn {
+    padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12.5px; font-weight:700;
+    border:2px solid transparent; font-family:inherit;
+  }
+  .label-type-btn[data-type="title"] { color:#ff3333; background:rgba(255,51,51,.12); }
+  .label-type-btn[data-type="subtitle"] { color:#ff1493; background:rgba(255,20,147,.12); }
+  .label-type-btn.selected { border-color:#fff; }
+
+  .map-label-title {
+    font-size:23px; font-weight:900; color:#ff2222;
+    text-shadow:0 0 4px #000, 0 0 8px #000, 1px 1px 2px #000;
+    white-space:nowrap; cursor:grab; user-select:none; pointer-events:auto;
+  }
+  .map-label-subtitle {
+    font-size:14px; font-weight:700; color:#ff1493;
+    text-shadow:0 0 3px #000, 0 0 6px #000, 1px 1px 2px #000;
+    white-space:nowrap; cursor:grab; user-select:none; pointer-events:auto;
+  }
+
   .grade-pin {
     display:flex; align-items:center; justify-content:center;
     width:32px; height:32px; border-radius:50%;
@@ -395,8 +420,9 @@ const DELETE_PASSWORD = "1124";
     ⭕ <b style="color:var(--accent)">서클을 켜야</b> 그 안의 스팟이 보여요 (안 켜면 스팟 숨김)<br>
     ⭐ 툴바 버튼 <b style="color:var(--accent)">더블클릭</b> = 그 항목 지도 표시 on/off<br>
     👥 팀 위치는 1~4번, 번호당 1개만 유지 · 모두에게 실시간 공유<br>
+    🏷 지명은 제목(빨강·큼)/소제목(핑크·작음) 직접 입력 가능<br>
     1번+⭕ 둘 다 있으면 <b style="color:var(--accent)">🧭 서클 내 최적 이동</b>으로 추천 (1번=나)<br>
-    🔄 리셋(우측 하단)은 스팟·차량·팀 위치는 그대로 두고<br>비행선·선·적표시·목적지만 초기화
+    🔄 리셋(우측 하단)은 스팟·차량·팀 위치·지명은 그대로 두고<br>비행선·선·적표시·목적지만 초기화
   </div>
 </aside>
 
@@ -409,6 +435,7 @@ const DELETE_PASSWORD = "1124";
     <button class="mode-btn" data-mode="flight">✈️ 비행선</button>
     <button class="mode-btn" data-mode="line">➖ 선긋기</button>
     <button class="mode-btn" data-mode="enemy">🔴 적 표시</button>
+    <button class="mode-btn" data-mode="label">🏷 지명</button>
     <div class="toolbar-sep"></div>
     <button class="mode-btn" data-mode="team">👥 팀 위치</button>
     <button class="mode-btn" data-mode="dest">🏁 목적지 추천</button>
@@ -430,6 +457,10 @@ const DELETE_PASSWORD = "1124";
     <div class="team-slot-dot" style="background:var(--team-2)" data-slot="2">2</div>
     <div class="team-slot-dot" style="background:var(--team-3)" data-slot="3">3</div>
     <div class="team-slot-dot" style="background:var(--team-4)" data-slot="4">4</div>
+  </div>
+  <div id="labelTypeBar">
+    <div class="label-type-btn selected" data-type="title">제목 (큰 글씨·빨강)</div>
+    <div class="label-type-btn" data-type="subtitle">소제목 (작은 글씨·진한핑크)</div>
   </div>
 
   <div id="routePanel">
@@ -507,7 +538,7 @@ const PRESET_MAPS = [
 ];
 const HIGH_URL = k => `https://media.githubusercontent.com/media/pubg/api-assets/master/Assets/Maps/${k}_Main_High_Res.png`;
 
-const MODE_LAYER_MAP = { spot:'spots', vehicle:'vehicles', flight:'flight', line:'lines', enemy:'enemies', team:'team', dest:'dest' };
+const MODE_LAYER_MAP = { spot:'spots', vehicle:'vehicles', flight:'flight', line:'lines', enemy:'enemies', team:'team', dest:'dest', label:'labels' };
 
 const LAYER_DEFS = [
   { key:'spots', label:'📍 스팟 핀' },
@@ -517,7 +548,8 @@ const LAYER_DEFS = [
   { key:'circle', label:'⭕ 서클' },
   { key:'enemies', label:'🔴 적 표시' },
   { key:'team', label:'👥 팀 위치' },
-  { key:'dest', label:'🏁 목적지' }
+  { key:'dest', label:'🏁 목적지' },
+  { key:'labels', label:'🏷 지명' }
 ];
 
 // ---------- Firebase ----------
@@ -536,7 +568,7 @@ const isShared = () => !!db;
 // ---------- 상태 ----------
 let state = {
   mapKey:null, mapLabel:'', kmSize:8, imgW:0, imgH:0,
-  spots:{}, vehicles:{}, lines:{}, team:{},   // 공유 (team: {1:{lat,lng}, 2:{...}, ...})
+  spots:{}, vehicles:{}, lines:{}, team:{}, labels:{},   // 공유
   flight:null, circle:null, enemies:{}, destination:null  // 로컬(판 단위)
 };
 let layerVisibility = {};
@@ -544,12 +576,14 @@ let gradeFilter = { S:true,A:true,B:true,C:true,D:true,E:true,F:true };
 
 let map=null, imageLayer=null;
 // 레이어 그룹 (표시 설정으로 add/remove 되는 실제 지도 레이어)
-let spotLayer, vehicleLayer, lineLayer, enemyLayer, flightGroup, circleGroup, teamLayer, destLayer;
+let spotLayer, vehicleLayer, lineLayer, enemyLayer, flightGroup, circleGroup, teamLayer, destLayer, labelLayer;
 
 let markers={}, vehicleMarkers={}, lineLayers={}, enemyMarkers={};
 let flightLine=null, flightTempMarker=null, lineTempMarker=null;
 let circleShape=null, circleCenterHandle=null, circleEdgeHandle=null;
 let teamMarkers={}, destMarker=null, destRouteLine=null;
+let labelMarkers={};
+let selectedLabelType = 'title';
 let selectedTeamSlot = '1';
 let routeLayers=[], currentRoutes=[], currentStrategy='grade';
 let mode=null, flightFirstPoint=null, lineFirstPoint=null, pendingLatLng=null;
@@ -604,7 +638,7 @@ function localKey() { return 'pubg_v7_data_' + state.mapKey; }
 function localTacticalKey() { return 'pubg_v7_tact_' + state.mapKey; }
 function saveSharedData() {
   if (isShared()) return;
-  try { localStorage.setItem(localKey(), JSON.stringify({ spots:state.spots, vehicles:state.vehicles, lines:state.lines, team:state.team })); }
+  try { localStorage.setItem(localKey(), JSON.stringify({ spots:state.spots, vehicles:state.vehicles, lines:state.lines, team:state.team, labels:state.labels })); }
   catch(e) { toast('❌ 저장 실패'); }
 }
 function saveTactical() {
@@ -617,9 +651,9 @@ function saveTactical() {
 function loadLocalData() {
   try {
     const raw = localStorage.getItem(localKey());
-    if (raw) { const d = JSON.parse(raw); state.spots=d.spots||{}; state.vehicles=d.vehicles||{}; state.lines=d.lines||{}; state.team=d.team||{}; }
-    else { state.spots={}; state.vehicles={}; state.lines={}; state.team={}; }
-  } catch(e) { state.spots={}; state.vehicles={}; state.lines={}; state.team={}; }
+    if (raw) { const d = JSON.parse(raw); state.spots=d.spots||{}; state.vehicles=d.vehicles||{}; state.lines=d.lines||{}; state.team=d.team||{}; state.labels=d.labels||{}; }
+    else { state.spots={}; state.vehicles={}; state.lines={}; state.team={}; state.labels={}; }
+  } catch(e) { state.spots={}; state.vehicles={}; state.lines={}; state.team={}; state.labels={}; }
   // 전술 정보(비행선/서클/적표시/목적지)는 페이지를 새로 열 때마다 항상 새 상태로 시작
   // (스팟 · 차량 · 팀 위치는 위에서 그대로 유지됨 — 영구/공유 데이터이므로)
   state.flight=null; state.circle=null; state.enemies={}; state.destination=null;
@@ -672,6 +706,17 @@ function deleteTeamLoc(slot) {
   if (teamMarkers[slot]) { teamLayer.removeLayer(teamMarkers[slot]); delete teamMarkers[slot]; }
   if (isShared()) mapRef.child('team/'+slot).remove(); else saveSharedData();
 }
+function writeLabel(label) {
+  state.labels[label.id] = label;
+  if (labelMarkers[label.id]) { labelLayer.removeLayer(labelMarkers[label.id]); delete labelMarkers[label.id]; }
+  addLabelMarker(label);
+  if (isShared()) mapRef.child('labels/'+label.id).set(label); else saveSharedData();
+}
+function deleteLabelItem(id) {
+  delete state.labels[id];
+  if (labelMarkers[id]) { labelLayer.removeLayer(labelMarkers[id]); delete labelMarkers[id]; }
+  if (isShared()) mapRef.child('labels/'+id).remove(); else saveSharedData();
+}
 
 function subscribeMap() {
   if (!isShared()) return;
@@ -679,8 +724,8 @@ function subscribeMap() {
   mapRef = db.ref('maps/' + state.mapKey);
   mapRef.on('value', snap => {
     const d = snap.val() || {};
-    state.spots = d.spots || {}; state.vehicles = d.vehicles || {}; state.lines = d.lines || {}; state.team = d.team || {};
-    rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers();
+    state.spots = d.spots || {}; state.vehicles = d.vehicles || {}; state.lines = d.lines || {}; state.team = d.team || {}; state.labels = d.labels || {};
+    rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers();
     applyCircleFilter();
   });
 }
@@ -698,7 +743,7 @@ function loadLayerVisibility() {
 }
 function saveLayerVisibility() { localStorage.setItem(LAYER_KEY, JSON.stringify(layerVisibility)); }
 function layerGroupOf(key) {
-  return { spots:spotLayer, vehicles:vehicleLayer, lines:lineLayer, flight:flightGroup, circle:circleGroup, enemies:enemyLayer, team:teamLayer, dest:destLayer }[key];
+  return { spots:spotLayer, vehicles:vehicleLayer, lines:lineLayer, flight:flightGroup, circle:circleGroup, enemies:enemyLayer, team:teamLayer, dest:destLayer, labels:labelLayer }[key];
 }
 function applyLayerVisibility() {
   LAYER_DEFS.forEach(d => {
@@ -789,6 +834,7 @@ function initMap() {
   circleGroup = L.layerGroup().addTo(map);
   teamLayer = L.layerGroup().addTo(map);
   destLayer = L.layerGroup().addTo(map);
+  labelLayer = L.layerGroup().addTo(map);
 }
 function displayImage(url, w, h) {
   if (imageLayer) { map.removeLayer(imageLayer); imageLayer = null; }
@@ -868,8 +914,8 @@ function finishEnterMap(preset) {
   $('#currentMapName').textContent = '🗺 ' + preset.label;
   clearRouteLayers(); removeFlightLayer(); removeCircleLayers(); removeDestMarker(); clearCircleRecommend();
   $('#routePanel').style.display = 'none';
-  if (isShared()) { loadLocalData(); state.spots={}; state.vehicles={}; state.lines={}; state.team={}; subscribeMap(); }
-  else { loadLocalData(); rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); }
+  if (isShared()) { loadLocalData(); state.spots={}; state.vehicles={}; state.lines={}; state.team={}; state.labels={}; subscribeMap(); }
+  else { loadLocalData(); rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers(); }
   rebuildEnemyMarkers();
   drawFlightLine(); drawCircle(); drawDestMarker();
   applyCircleFilter();
@@ -1222,6 +1268,38 @@ $$('.team-slot-dot').forEach(dot => {
   });
 });
 
+// ---------- 지명(텍스트 라벨) ----------
+function addLabelMarker(label) {
+  const cls = label.type === 'title' ? 'map-label-title' : 'map-label-subtitle';
+  const m = L.marker([label.lat, label.lng], {
+    icon: L.divIcon({ className:'', html:`<div class="${cls}">${escapeHtml(label.text)}</div>`, iconSize:null, iconAnchor:[0,10] }),
+    draggable:true, zIndexOffset: label.type === 'title' ? 700 : 650
+  }).addTo(labelLayer);
+  m.on('dragend', () => {
+    const ll = m.getLatLng();
+    label.lat = ll.lat; label.lng = ll.lng;
+    if (isShared()) mapRef.child('labels/'+label.id).set(label); else { state.labels[label.id]=label; saveSharedData(); }
+  });
+  m.on('dblclick', e => {
+    L.DomEvent.stopPropagation(e);
+    deleteLabelItem(label.id);
+    toast('🗑 지명 삭제됨');
+  });
+  labelMarkers[label.id] = m;
+}
+function rebuildLabelMarkers() {
+  Object.values(labelMarkers).forEach(m => labelLayer.removeLayer(m));
+  labelMarkers = {};
+  Object.values(state.labels).forEach(addLabelMarker);
+}
+$$('.label-type-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    selectedLabelType = btn.dataset.type;
+    $$('.label-type-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+  });
+});
+
 // ---------- 목적지 + 추천 ----------
 function removeDestMarker() {
   if (destMarker) { destLayer.removeLayer(destMarker); destMarker = null; }
@@ -1378,6 +1456,7 @@ const HINTS = {
   line:'색상을 고르고 시작점 → 끝점 순서로 2번 클릭하세요 (몸통 드래그 이동, 더블클릭 삭제)',
   enemy:'적을 목격한 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
   team:'번호를 고르고 지도를 클릭하면 그 팀원 위치가 표시돼요 (드래그 이동 · 더블클릭 삭제, 번호당 1개만 유지)',
+  label:'제목/소제목을 고르고 지도를 클릭하면 텍스트를 입력할 수 있어요 (드래그 이동 · 더블클릭 삭제)',
   dest:'가려는 목적지를 클릭하세요 — 근처 최적 스팟을 자동 추천합니다 (더블클릭 삭제)'
 };
 function setMode(m) {
@@ -1390,6 +1469,7 @@ function setMode(m) {
   });
   $('#lineColorBar').style.display = (m === 'line') ? 'flex' : 'none';
   $('#teamSlotBar').style.display = (m === 'team') ? 'flex' : 'none';
+  $('#labelTypeBar').style.display = (m === 'label') ? 'flex' : 'none';
   const hint = $('#modeHint');
   hint.textContent = (m && HINTS[m]) || '';
   hint.style.display = hint.textContent ? 'block' : 'none';
@@ -1460,6 +1540,13 @@ function onMapClick(e) {
       writeTeamLoc(selectedTeamSlot, loc);
       syncTeamSlotBar();
       toast(`👤 팀원 ${selectedTeamSlot}번 위치 표시 (드래그 이동 가능)`);
+    }
+  } else if (mode === 'label') {
+    const text = prompt(selectedLabelType === 'title' ? '제목으로 넣을 지명을 입력하세요' : '소제목으로 넣을 지명을 입력하세요');
+    if (text && text.trim()) {
+      const label = { id: uid(), text: text.trim(), type: selectedLabelType, lat: e.latlng.lat, lng: e.latlng.lng };
+      writeLabel(label);
+      toast(`🏷 지명 "${label.text}" 추가됨`);
     }
   } else if (mode === 'dest') {
     state.destination = { lat: e.latlng.lat, lng: e.latlng.lng };
@@ -1584,8 +1671,8 @@ $('#clearAllBtn').addEventListener('click', () => {
     ? `[${state.mapLabel}] 맵의 공유 데이터(스팟/차량/선)를 전부 삭제합니다.\n⚠️ 모든 사용자에게서 삭제됩니다! 계속할까요?`
     : `[${state.mapLabel}] 맵의 내 데이터를 전부 삭제할까요?`;
   if (!confirm(msg)) return;
-  state.spots = {}; state.vehicles = {}; state.lines = {}; state.team = {};
-  rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers();
+  state.spots = {}; state.vehicles = {}; state.lines = {}; state.team = {}; state.labels = {};
+  rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers();
   if (isShared()) { mapRef.remove(); } else saveSharedData();
   state.flight = null; state.circle = null; state.enemies = {}; state.destination = null;
   removeFlightLayer(); removeCircleLayers(); clearRouteLayers(); rebuildEnemyMarkers(); removeDestMarker(); clearCircleRecommend();
