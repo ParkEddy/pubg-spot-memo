@@ -1172,18 +1172,14 @@ $('#circleBtn').addEventListener('click', () => {
 });
 const insideCircle = p => state.circle && distPx(p, state.circle) <= state.circle.r;
 
-// 서클 반경이 이 값(km) 미만이면 스팟을 등급 색깔의 작은 점으로 간략 표시 (핀이 많아질 때 겹침 방지)
-const SMALL_CIRCLE_KM = 0.4;
-function isSmallCircle() { return !!state.circle && pxToKm(state.circle.r) < SMALL_CIRCLE_KM; }
-
 function applyCircleFilter() {
-  const dotMode = isSmallCircle();
   Object.values(state.spots).forEach(spot => {
     const m = markers[spot.id]; if (!m) return;
     // 스팟은 서클이 켜져 있고, 그 안에 있을 때만 노출 (서클 없으면 항상 숨김 — 핀이 많아져도 지도가 안 뒤덮이도록)
     const show = gradeFilter[spot.grade] && state.circle && insideCircle(spot);
     const el = m.getElement(); if (el) el.style.display = show ? '' : 'none';
-    m.setIcon(dotMode ? makeDotIcon(spot.grade) : makeGradeIcon(spot.grade));
+    // 서클 크기와 무관하게, 서클이 켜져 있으면 항상 등급색 점으로 간략 표시 (마우스 올리면 등급/이름 카드가 뜸)
+    m.setIcon(state.circle ? makeDotIcon(spot.grade) : makeGradeIcon(spot.grade));
   });
   Object.values(state.vehicles).forEach(v => {
     const m = vehicleMarkers[v.id]; if (!m) return;
