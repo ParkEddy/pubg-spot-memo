@@ -197,23 +197,32 @@ const DELETE_PASSWORD = "1124";
   .dest-pin span { transform:rotate(45deg); font-size:14px; }
 
   .leaflet-tooltip.spot-tooltip {
-    background:rgba(20,20,22,.96); border:1px solid var(--accent);
-    border-radius:8px; color:var(--text); padding:10px 12px;
-    box-shadow:0 4px 16px rgba(0,0,0,.6); max-width:260px; white-space:normal;
+    background:rgba(20,20,22,.97); border:1px solid var(--accent);
+    border-radius:8px; color:var(--text); padding:10px 13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.6);
+    min-width:180px; max-width:300px;
+    white-space:normal; word-break:keep-all; overflow-wrap:break-word;
   }
   .leaflet-tooltip.spot-tooltip::before { display:none; }
   .leaflet-tooltip.vehicle-tooltip { border-color:var(--vehicle); }
   .leaflet-tooltip.dest-tooltip { border-color:var(--dest); }
-  .tt-head { display:flex; align-items:center; gap:7px; margin-bottom:5px; }
+  .tt-head { display:flex; align-items:center; gap:7px; margin-bottom:6px; white-space:nowrap; }
   .tt-grade {
     width:22px; height:22px; min-width:22px; border-radius:50%;
     display:inline-flex; align-items:center; justify-content:center;
     font-weight:800; font-size:12px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);
   }
-  .tt-name { font-weight:700; font-size:13.5px; }
-  .tt-pc { font-size:11.5px; color:#c8c8cc; line-height:1.55; }
-  .tt-pc b { color:#fff; }
-  .tt-edit-hint { font-size:10.5px; color:var(--text-dim); margin-top:4px; }
+  .tt-name { font-weight:700; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+  .tt-pc-row { display:flex; gap:12px; }
+  .tt-pc { flex:1; min-width:0; font-size:11px; color:#c8c8cc; line-height:1.5; word-break:keep-all; }
+  .tt-pc b { color:#fff; display:block; margin-bottom:1px; }
+  .tt-edit-hint { font-size:10px; color:var(--text-dim); margin-top:6px; white-space:nowrap; }
+
+  .add-spot-popup .leaflet-popup-content-wrapper {
+    background:rgba(20,20,22,.97); border:1px solid var(--accent); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.6);
+  }
+  .add-spot-popup .leaflet-popup-content { margin:6px 8px; }
+  .add-spot-popup .leaflet-popup-tip { background:rgba(20,20,22,.97); }
 
   #routePanel {
     position:absolute; bottom:16px; right:16px; z-index:900;
@@ -340,9 +349,10 @@ const DELETE_PASSWORD = "1124";
 
   <div id="sidebarSpacer"></div>
   <div id="sidebarFooter">
+    🖱 지도 <b style="color:var(--accent)">더블클릭</b> = 스팟 추가 버튼 노출<br>
     📍 스팟 클릭 = 수정 · 🧹 지우개 = 모든 핀/선 삭제<br>
     ➖ 선은 몸통을 드래그하면 통째로 이동됩니다<br>
-    ⭐ 활성화된 툴바 버튼을 <b style="color:var(--accent)">한 번 더</b> 클릭하면<br>그 항목이 지도에서 켜지고 꺼집니다<br>
+    ⭐ 툴바 버튼 <b style="color:var(--accent)">더블클릭</b> = 그 항목 지도 표시 on/off<br>
     ⭕ 서클 배치 시 내부 핀만 표시됩니다
   </div>
 </aside>
@@ -351,7 +361,6 @@ const DELETE_PASSWORD = "1124";
   <div id="map"></div>
 
   <div id="toolbar">
-    <button class="mode-btn active" data-mode="spot">📍 스팟</button>
     <button class="mode-btn" data-mode="vehicle">🚗 차량</button>
     <button class="mode-btn" data-mode="flight">✈️ 비행선</button>
     <button class="mode-btn" data-mode="line">➖ 선긋기</button>
@@ -485,11 +494,11 @@ let map=null, imageLayer=null;
 let spotLayer, vehicleLayer, lineLayer, enemyLayer, flightGroup, circleGroup, myLocLayer, destLayer;
 
 let markers={}, vehicleMarkers={}, lineLayers={}, enemyMarkers={};
-let flightLine=null, flightTempMarker=null;
+let flightLine=null, flightTempMarker=null, lineTempMarker=null;
 let circleShape=null, circleCenterHandle=null, circleEdgeHandle=null;
 let myLocMarker=null, destMarker=null, destRouteLine=null;
 let routeLayers=[], currentRoutes=[], currentStrategy='grade';
-let mode='spot', flightFirstPoint=null, lineFirstPoint=null, pendingLatLng=null;
+let mode=null, flightFirstPoint=null, lineFirstPoint=null, pendingLatLng=null;
 let selectedGrade='S', selectedLineColor='yellow', editingSpotId=null;
 let draggingLine = null; // { line, origA, origB, startLatLng, redraw } — 선 전체 드래그용 전역 상태
 
@@ -693,8 +702,9 @@ function buildGradeFilters() {
 
 // ---------- 지도 초기화 ----------
 function initMap() {
-  map = L.map('map', { crs: L.CRS.Simple, minZoom:-5, maxZoom:4, zoomSnap:.25, zoomDelta:.5, wheelPxPerZoomLevel:90, attributionControl:false });
+  map = L.map('map', { crs: L.CRS.Simple, minZoom:-5, maxZoom:4, zoomSnap:.25, zoomDelta:.5, wheelPxPerZoomLevel:90, attributionControl:false, doubleClickZoom:false });
   map.on('click', onMapClick);
+  map.on('dblclick', onMapDoubleClick);
   // 선 전체 드래그 이동용 전역 리스너 (라인 개수와 무관하게 딱 1벌만 존재)
   map.on('mousemove', (e) => {
     if (!draggingLine) return;
@@ -843,12 +853,20 @@ const makeDestIcon = () => L.divIcon({ className:'', html:`<div class="dest-pin"
 
 function spotTooltipHtml(spot) {
   const c = GRADE_COLORS[spot.grade]||'#888';
-  const pros = spot.pros ? `<div class="tt-pc"><b>👍 장점</b> ${escapeHtml(spot.pros)}</div>` : '';
-  const cons = spot.cons ? `<div class="tt-pc"><b>👎 단점</b> ${escapeHtml(spot.cons)}</div>` : '';
+  const hasPros = !!spot.pros, hasCons = !!spot.cons;
+  let body;
+  if (!hasPros && !hasCons) {
+    body = '<div class="tt-pc">메모 없음</div>';
+  } else {
+    body = `<div class="tt-pc-row">
+      ${hasPros ? `<div class="tt-pc"><b>👍 장점</b>${escapeHtml(spot.pros)}</div>` : ''}
+      ${hasCons ? `<div class="tt-pc"><b>👎 단점</b>${escapeHtml(spot.cons)}</div>` : ''}
+    </div>`;
+  }
   return `<div class="tt-head"><span class="tt-grade" style="background:${c}">${spot.grade}</span>
     <span class="tt-name">${escapeHtml(spot.name)||'(이름 없음)'}</span></div>
-    ${pros}${cons}${!spot.pros && !spot.cons ? '<div class="tt-pc">메모 없음</div>' : ''}
-    <div class="tt-edit-hint">✏️ 클릭 = 수정 · 🧹 지우개 모드 클릭 = 삭제</div>`;
+    ${body}
+    <div class="tt-edit-hint">✏️ 클릭=수정 · 🧹 지우개=삭제</div>`;
 }
 function addSpotMarker(spot) {
   const m = L.marker([spot.lat, spot.lng], { icon:makeGradeIcon(spot.grade), riseOnHover:true }).addTo(spotLayer);
@@ -1177,7 +1195,6 @@ $$('.strategy-btn').forEach(b => b.addEventListener('click', () => {
 
 // ---------- 모드/클릭 ----------
 const HINTS = {
-  spot:'지도를 클릭하면 스팟을 추가합니다',
   vehicle:'차가 고정으로 젠 되는 위치를 클릭하세요 (드래그 이동)',
   flight:'비행선 시작점 → 끝점 순서로 2번 클릭하세요',
   line:'색상을 고르고 시작점 → 끝점 순서로 2번 클릭하세요',
@@ -1190,39 +1207,63 @@ function setMode(m) {
   mode = m;
   flightFirstPoint = null; lineFirstPoint = null;
   if (flightTempMarker) { flightGroup.removeLayer(flightTempMarker); flightTempMarker = null; }
+  if (lineTempMarker) { lineLayer.removeLayer(lineTempMarker); lineTempMarker = null; }
   $$('.mode-btn[data-mode]').forEach(b => {
     b.classList.toggle('active', b.dataset.mode === m && m !== 'eraser');
     b.classList.toggle('eraser-active', b.dataset.mode === m && m === 'eraser');
   });
   $('#lineColorBar').style.display = (m === 'line') ? 'flex' : 'none';
   const hint = $('#modeHint');
-  hint.textContent = HINTS[m] || '';
+  hint.textContent = (m && HINTS[m]) || '';
   hint.style.display = hint.textContent ? 'block' : 'none';
   clearTimeout(hint._t);
   hint._t = setTimeout(() => hint.style.display = 'none', 4200);
 }
-$$('.mode-btn[data-mode]').forEach(b => b.addEventListener('click', () => {
-  const m = b.dataset.mode;
-  const layerKey = MODE_LAYER_MAP[m];
-  // 이미 선택되어 있는 모드 버튼을 다시 클릭 → 그 레이어를 지도에서 표시/숨김 토글
-  if (mode === m && m !== 'eraser' && layerKey) {
+
+// 단일 클릭 = 도구 선택/해제(같은 버튼 다시 누르면 꺼짐) · 더블 클릭 = 지도 위 표시 on/off (모드 선택과 무관)
+$$('.mode-btn[data-mode]').forEach(b => {
+  b.addEventListener('click', () => {
+    const m = b.dataset.mode;
+    setMode(mode === m ? null : m);
+  });
+  b.addEventListener('dblclick', (ev) => {
+    ev.preventDefault();
+    L.DomEvent.stopPropagation(ev);
+    const layerKey = MODE_LAYER_MAP[b.dataset.mode];
+    if (!layerKey) return;
     layerVisibility[layerKey] = layerVisibility[layerKey] === false ? true : false;
     saveLayerVisibility();
     applyLayerVisibility();
     syncToolbarLayerButtons();
     toast(`${b.textContent.trim()} ${layerVisibility[layerKey] !== false ? '표시 ON' : '표시 OFF'}`);
-    return;
-  }
-  setMode(m);
-}));
+  });
+});
+
+// ---------- 더블클릭 = 구글맵 스타일 "여기에 스팟 추가" 팝업 ----------
+function onMapDoubleClick(e) {
+  if (!state.imgW) return;
+  if (mode) { toast('다른 도구가 선택되어 있어요. 지우개/차량 등 도구를 끄면(같은 버튼 다시 클릭) 더블클릭으로 스팟을 추가할 수 있어요.'); return; }
+  const latlng = e.latlng;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `<button id="addSpotHereBtn" style="
+    background:var(--accent); color:#1a1a1a; border:none; border-radius:6px;
+    padding:8px 14px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;
+  ">📍 여기에 스팟 추가</button>`;
+  const popup = L.popup({ closeButton:false, className:'add-spot-popup', offset:[0,-4] })
+    .setLatLng(latlng)
+    .setContent(wrap)
+    .openOn(map);
+  wrap.querySelector('#addSpotHereBtn').addEventListener('click', () => {
+    map.closePopup(popup);
+    pendingLatLng = latlng; editingSpotId = null;
+    openAddModal();
+  });
+}
 
 function onMapClick(e) {
   if (!state.imgW) return;
   if (mode === 'eraser') return; // 지우개 모드는 개별 마커 클릭으로만 동작 (빈 곳 클릭은 무시)
-  if (mode === 'spot') {
-    pendingLatLng = e.latlng; editingSpotId = null;
-    openAddModal();
-  } else if (mode === 'vehicle') {
+  if (mode === 'vehicle') {
     const v = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng };
     writeVehicle(v);
     toast('🚗 차량 스폰 추가');
@@ -1251,19 +1292,19 @@ function onMapClick(e) {
       flightFirstPoint = null;
       drawFlightLine(); saveTactical();
       toast('✈️ 비행선 완료! 🧭 추천 경로를 눌러보세요');
-      setMode('spot');
+      setMode(null);
     }
   } else if (mode === 'line') {
     if (!lineFirstPoint) {
       lineFirstPoint = e.latlng;
-      flightTempMarker = L.circleMarker(e.latlng, { radius:6, color:LINE_COLORS[selectedLineColor], fillColor:LINE_COLORS[selectedLineColor], fillOpacity:1 }).addTo(lineLayer);
-      toast('끝점을 클릭하세요');
+      lineTempMarker = L.circleMarker(e.latlng, { radius:6, color:LINE_COLORS[selectedLineColor], fillColor:LINE_COLORS[selectedLineColor], fillOpacity:1 }).addTo(lineLayer);
+      toast('끝점을 클릭하세요 (다른 모드로 바꾸면 취소됩니다)');
     } else {
       const line = { id: uid(), color: selectedLineColor, a:{lat:lineFirstPoint.lat,lng:lineFirstPoint.lng}, b:{lat:e.latlng.lat,lng:e.latlng.lng} };
       writeLine(line);
       lineFirstPoint = null;
-      if (flightTempMarker) { lineLayer.removeLayer(flightTempMarker); flightTempMarker = null; }
-      toast('선 추가 완료! 끝점을 드래그해서 위치 조정 가능');
+      if (lineTempMarker) { lineLayer.removeLayer(lineTempMarker); lineTempMarker = null; }
+      toast('선 추가 완료! 몸통을 드래그하면 통째로 이동됩니다');
     }
   }
 }
@@ -1273,6 +1314,8 @@ $('#newMatchBtn').addEventListener('click', () => {
   rebuildEnemyMarkers();
   $('#routePanel').style.display = 'none';
   flightFirstPoint = null; lineFirstPoint = null;
+  if (flightTempMarker) { flightGroup.removeLayer(flightTempMarker); flightTempMarker = null; }
+  if (lineTempMarker) { lineLayer.removeLayer(lineTempMarker); lineTempMarker = null; }
   saveTactical();
   applyCircleFilter();
   toast('🔄 새 판! 비행선/서클/적 표시 초기화 (스팟·차량·선·내위치·목적지는 유지)');
