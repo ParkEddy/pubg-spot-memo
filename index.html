@@ -130,6 +130,7 @@ const DELETE_PASSWORD = "1124";
   .mode-btn:hover { color:var(--text); background:rgba(255,255,255,.06); }
   .mode-btn.active { color:var(--accent); border-color:var(--accent); background:rgba(243,156,18,.12); }
   .mode-btn.eraser-active { color:var(--eraser); border-color:var(--eraser); background:rgba(255,23,68,.14); }
+  .mode-btn.layer-off { opacity:.4; text-decoration:line-through; }
   .mode-btn.action { color:var(--text); }
   .toolbar-sep { width:1px; background:var(--border); margin:2px 2px; }
   #modeHint {
@@ -339,7 +340,9 @@ const DELETE_PASSWORD = "1124";
 
   <div id="sidebarSpacer"></div>
   <div id="sidebarFooter">
-    📍 스팟 클릭 = 수정/삭제 · 🧹 지우개 = 모든 핀/선 삭제<br>
+    📍 스팟 클릭 = 수정 · 🧹 지우개 = 모든 핀/선 삭제<br>
+    ➖ 선은 몸통을 드래그하면 통째로 이동됩니다<br>
+    ⭐ 활성화된 툴바 버튼을 <b style="color:var(--accent)">한 번 더</b> 클릭하면<br>그 항목이 지도에서 켜지고 꺼집니다<br>
     ⭕ 서클 배치 시 내부 핀만 표시됩니다
   </div>
 </aside>
@@ -442,6 +445,8 @@ const PRESET_MAPS = [
 ];
 const HIGH_URL = k => `https://media.githubusercontent.com/media/pubg/api-assets/master/Assets/Maps/${k}_Main_High_Res.png`;
 
+const MODE_LAYER_MAP = { spot:'spots', vehicle:'vehicles', flight:'flight', line:'lines', enemy:'enemies', myloc:'myloc', dest:'dest' };
+
 const LAYER_DEFS = [
   { key:'spots', label:'📍 스팟 핀' },
   { key:'vehicles', label:'🚗 차량 핀' },
@@ -486,6 +491,7 @@ let myLocMarker=null, destMarker=null, destRouteLine=null;
 let routeLayers=[], currentRoutes=[], currentStrategy='grade';
 let mode='spot', flightFirstPoint=null, lineFirstPoint=null, pendingLatLng=null;
 let selectedGrade='S', selectedLineColor='yellow', editingSpotId=null;
+let draggingLine = null; // { line, origA, origB, startLatLng, redraw } — 선 전체 드래그용 전역 상태
 
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
@@ -562,12 +568,42 @@ function loadLocalData() {
   } catch(e) { state.flight=null; state.circle=null; state.enemies={}; state.myLocation=null; state.destination=null; }
 }
 
-function writeSpot(spot)   { if (isShared()) mapRef.child('spots/'+spot.id).set(spot); else { state.spots[spot.id]=spot; saveSharedData(); } }
-function deleteSpot(id)    { if (isShared()) mapRef.child('spots/'+id).remove();       else { delete state.spots[id]; saveSharedData(); } }
-function writeVehicle(v)   { if (isShared()) mapRef.child('vehicles/'+v.id).set(v);    else { state.vehicles[v.id]=v; saveSharedData(); } }
-function deleteVehicle(id) { if (isShared()) mapRef.child('vehicles/'+id).remove();    else { delete state.vehicles[id]; saveSharedData(); } }
-function writeLine(line)   { if (isShared()) mapRef.child('lines/'+line.id).set(line); else { state.lines[line.id]=line; saveSharedData(); } }
-function deleteLine(id)    { if (isShared()) mapRef.child('lines/'+id).remove();       else { delete state.lines[id]; saveSharedData(); } }
+// 낙관적(optimistic) 업데이트: Firebase 응답을 기다리지 않고 항상 내 화면에 즉시 반영한 뒤,
+// 공유 모드면 백그라운드로 서버에도 반영한다. (네트워크 지연/실패와 무관하게 내 눈엔 바로 보임)
+function writeSpot(spot) {
+  state.spots[spot.id] = spot;
+  if (markers[spot.id]) { spotLayer.removeLayer(markers[spot.id]); delete markers[spot.id]; }
+  addSpotMarker(spot);
+  applyCircleFilter();
+  if (isShared()) mapRef.child('spots/'+spot.id).set(spot); else saveSharedData();
+}
+function deleteSpot(id) {
+  delete state.spots[id];
+  if (markers[id]) { spotLayer.removeLayer(markers[id]); delete markers[id]; }
+  if (isShared()) mapRef.child('spots/'+id).remove(); else saveSharedData();
+}
+function writeVehicle(v) {
+  state.vehicles[v.id] = v;
+  if (vehicleMarkers[v.id]) { vehicleLayer.removeLayer(vehicleMarkers[v.id]); delete vehicleMarkers[v.id]; }
+  addVehicleMarker(v);
+  applyCircleFilter();
+  if (isShared()) mapRef.child('vehicles/'+v.id).set(v); else saveSharedData();
+}
+function deleteVehicle(id) {
+  delete state.vehicles[id];
+  if (vehicleMarkers[id]) { vehicleLayer.removeLayer(vehicleMarkers[id]); delete vehicleMarkers[id]; }
+  if (isShared()) mapRef.child('vehicles/'+id).remove(); else saveSharedData();
+}
+function writeLine(line) {
+  state.lines[line.id] = line;
+  addLineLayer(line); // addLineLayer가 내부에서 기존 레이어 제거 후 재생성
+  if (isShared()) mapRef.child('lines/'+line.id).set(line); else saveSharedData();
+}
+function deleteLine(id) {
+  delete state.lines[id];
+  removeLineLayer(id);
+  if (isShared()) mapRef.child('lines/'+id).remove(); else saveSharedData();
+}
 
 function subscribeMap() {
   if (!isShared()) return;
@@ -619,8 +655,17 @@ function buildSettingsPanel() {
       layerVisibility[d.key] = nowOn;
       saveLayerVisibility();
       applyLayerVisibility();
+      syncToolbarLayerButtons();
     });
     wrap.appendChild(row);
+  });
+}
+// 툴바의 모드 버튼에도 현재 레이어 표시 여부를 반영 (꺼진 레이어는 흐리게 + 취소선)
+function syncToolbarLayerButtons() {
+  $$('.mode-btn[data-mode]').forEach(b => {
+    const layerKey = MODE_LAYER_MAP[b.dataset.mode];
+    if (!layerKey) return;
+    b.classList.toggle('layer-off', layerVisibility[layerKey] === false);
   });
 }
 $('#settingsBtn').addEventListener('click', () => { buildSettingsPanel(); $('#settingsBackdrop').classList.add('open'); });
@@ -650,6 +695,23 @@ function buildGradeFilters() {
 function initMap() {
   map = L.map('map', { crs: L.CRS.Simple, minZoom:-5, maxZoom:4, zoomSnap:.25, zoomDelta:.5, wheelPxPerZoomLevel:90, attributionControl:false });
   map.on('click', onMapClick);
+  // 선 전체 드래그 이동용 전역 리스너 (라인 개수와 무관하게 딱 1벌만 존재)
+  map.on('mousemove', (e) => {
+    if (!draggingLine) return;
+    const { line, origA, origB, startLatLng, redraw } = draggingLine;
+    const dLat = e.latlng.lat - startLatLng.lat;
+    const dLng = e.latlng.lng - startLatLng.lng;
+    line.a = { lat: origA.lat+dLat, lng: origA.lng+dLng };
+    line.b = { lat: origB.lat+dLat, lng: origB.lng+dLng };
+    redraw();
+  });
+  map.on('mouseup', () => {
+    if (!draggingLine) return;
+    const { line } = draggingLine;
+    draggingLine = null;
+    map.dragging.enable();
+    writeLine(line);
+  });
   spotLayer = L.layerGroup().addTo(map);
   vehicleLayer = L.layerGroup().addTo(map);
   lineLayer = L.layerGroup().addTo(map);
@@ -793,7 +855,7 @@ function addSpotMarker(spot) {
   m.bindTooltip(spotTooltipHtml(spot), { className:'spot-tooltip', direction:'top', offset:[0,-18], opacity:1 });
   m.on('click', (e) => {
     L.DomEvent.stopPropagation(e);
-    if (mode === 'eraser') { deleteSpot(spot.id); if (!isShared()) { spotLayer.removeLayer(m); delete markers[spot.id]; } toast('🧹 스팟 삭제됨'); return; }
+    if (mode === 'eraser') { deleteSpot(spot.id); toast('🧹 스팟 삭제됨'); return; }
     openEditModal(spot);
   });
   markers[spot.id] = m;
@@ -810,7 +872,6 @@ function addVehicleMarker(v) {
     if (mode !== 'eraser') return;
     L.DomEvent.stopPropagation(e);
     deleteVehicle(v.id);
-    if (!isShared()) { vehicleLayer.removeLayer(m); delete vehicleMarkers[v.id]; }
     toast('🧹 차량 스폰 삭제됨');
   });
   vehicleMarkers[v.id] = m;
@@ -836,33 +897,53 @@ function rebuildEnemyMarkers() { Object.values(enemyMarkers).forEach(m => enemyL
 function removeLineLayer(id) {
   const obj = lineLayers[id];
   if (!obj) return;
-  [obj.poly, obj.h1, obj.h2].forEach(l => lineLayer.removeLayer(l));
+  [obj.poly, obj.hit, obj.h1, obj.h2].forEach(l => { if (l) lineLayer.removeLayer(l); });
   delete lineLayers[id];
 }
 function addLineLayer(line) {
   removeLineLayer(line.id);
   const color = LINE_COLORS[line.color] || '#fff';
-  const poly = L.polyline([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]], { color, weight:5, opacity:.92 }).addTo(lineLayer);
+  // 넓은 투명 히트라인: 얇은 선도 쉽게 클릭/드래그할 수 있도록 실제 선 아래에 깔아둠
+  const hit = L.polyline([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]], { color:'#000', weight:22, opacity:0 }).addTo(lineLayer);
+  const poly = L.polyline([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]], { color, weight:5, opacity:.92, interactive:false }).addTo(lineLayer);
   const h1 = L.marker([line.a.lat,line.a.lng], { icon:L.divIcon({className:'',html:`<div class="line-handle"></div>`,iconSize:[13,13],iconAnchor:[6,6]}), draggable:true, zIndexOffset:900 }).addTo(lineLayer);
   const h2 = L.marker([line.b.lat,line.b.lng], { icon:L.divIcon({className:'',html:`<div class="line-handle"></div>`,iconSize:[13,13],iconAnchor:[6,6]}), draggable:true, zIndexOffset:900 }).addTo(lineLayer);
 
-  h1.on('drag', () => { const ll=h1.getLatLng(); line.a={lat:ll.lat,lng:ll.lng}; poly.setLatLngs([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]]); });
+  function redraw() {
+    const coords = [[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]];
+    poly.setLatLngs(coords); hit.setLatLngs(coords);
+    h1.setLatLng([line.a.lat,line.a.lng]); h2.setLatLng([line.b.lat,line.b.lng]);
+  }
+  h1.on('drag', () => { const ll=h1.getLatLng(); line.a={lat:ll.lat,lng:ll.lng}; redraw(); });
   h1.on('dragend', () => writeLine(line));
-  h2.on('drag', () => { const ll=h2.getLatLng(); line.b={lat:ll.lat,lng:ll.lng}; poly.setLatLngs([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]]); });
+  h2.on('drag', () => { const ll=h2.getLatLng(); line.b={lat:ll.lat,lng:ll.lng}; redraw(); });
   h2.on('dragend', () => writeLine(line));
 
   const eraseLine = (e) => {
     if (mode !== 'eraser') return;
     L.DomEvent.stopPropagation(e);
     deleteLine(line.id);
-    if (!isShared()) removeLineLayer(line.id);
     toast('🧹 선 삭제됨');
   };
-  poly.on('click', eraseLine);
+  hit.on('click', eraseLine);
   h1.on('click', eraseLine);
   h2.on('click', eraseLine);
 
-  lineLayers[line.id] = { line, poly, h1, h2 };
+  // 선 전체를 잡아서 통째로 이동 (지우개 모드가 아닐 때만) — 전역 mousemove/mouseup 리스너(초기화 시 1회 등록)를 사용
+  hit.on('mousedown', (e) => {
+    if (mode === 'eraser') return;
+    L.DomEvent.stopPropagation(e);
+    draggingLine = {
+      line,
+      origA: { lat: line.a.lat, lng: line.a.lng },
+      origB: { lat: line.b.lat, lng: line.b.lng },
+      startLatLng: e.latlng,
+      redraw
+    };
+    map.dragging.disable();
+  });
+
+  lineLayers[line.id] = { line, poly, hit, h1, h2 };
 }
 function rebuildLineLayers() { Object.keys(lineLayers).forEach(removeLineLayer); Object.values(state.lines).forEach(addLineLayer); }
 $$('.color-dot').forEach(dot => {
@@ -1120,7 +1201,20 @@ function setMode(m) {
   clearTimeout(hint._t);
   hint._t = setTimeout(() => hint.style.display = 'none', 4200);
 }
-$$('.mode-btn[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+$$('.mode-btn[data-mode]').forEach(b => b.addEventListener('click', () => {
+  const m = b.dataset.mode;
+  const layerKey = MODE_LAYER_MAP[m];
+  // 이미 선택되어 있는 모드 버튼을 다시 클릭 → 그 레이어를 지도에서 표시/숨김 토글
+  if (mode === m && m !== 'eraser' && layerKey) {
+    layerVisibility[layerKey] = layerVisibility[layerKey] === false ? true : false;
+    saveLayerVisibility();
+    applyLayerVisibility();
+    syncToolbarLayerButtons();
+    toast(`${b.textContent.trim()} ${layerVisibility[layerKey] !== false ? '표시 ON' : '표시 OFF'}`);
+    return;
+  }
+  setMode(m);
+}));
 
 function onMapClick(e) {
   if (!state.imgW) return;
@@ -1131,7 +1225,6 @@ function onMapClick(e) {
   } else if (mode === 'vehicle') {
     const v = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng };
     writeVehicle(v);
-    if (!isShared()) addVehicleMarker(v);
     toast('🚗 차량 스폰 추가');
   } else if (mode === 'enemy') {
     const en = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng };
@@ -1168,7 +1261,6 @@ function onMapClick(e) {
     } else {
       const line = { id: uid(), color: selectedLineColor, a:{lat:lineFirstPoint.lat,lng:lineFirstPoint.lng}, b:{lat:e.latlng.lat,lng:e.latlng.lng} };
       writeLine(line);
-      if (!isShared()) addLineLayer(line);
       lineFirstPoint = null;
       if (flightTempMarker) { lineLayer.removeLayer(flightTempMarker); flightTempMarker = null; }
       toast('선 추가 완료! 끝점을 드래그해서 위치 조정 가능');
@@ -1238,10 +1330,6 @@ $('#saveBtn').addEventListener('click', () => {
     lat: pendingLatLng.lat, lng: pendingLatLng.lng
   };
   writeSpot(spot);
-  if (!isShared()) {
-    if (editingSpotId && markers[editingSpotId]) { spotLayer.removeLayer(markers[editingSpotId]); delete markers[editingSpotId]; }
-    addSpotMarker(spot); applyCircleFilter();
-  }
   const isEdit = !!editingSpotId;
   closeModal();
   toast(`✅ [${spot.grade}] ${spot.name} ${isEdit ? '수정' : '추가'} 완료${isShared() ? ' (공유됨)' : ''}`);
@@ -1250,7 +1338,6 @@ $('#modalDeleteBtn').addEventListener('click', () => {
   if (!editingSpotId) return;
   if (!confirm('이 스팟을 삭제할까요?')) return;
   deleteSpot(editingSpotId);
-  if (!isShared()) { if (markers[editingSpotId]) { spotLayer.removeLayer(markers[editingSpotId]); delete markers[editingSpotId]; } }
   closeModal();
   toast('🗑 스팟 삭제됨');
 });
@@ -1266,12 +1353,9 @@ $('#clearAllBtn').addEventListener('click', () => {
     ? `[${state.mapLabel}] 맵의 공유 데이터(스팟/차량/선)를 전부 삭제합니다.\n⚠️ 모든 사용자에게서 삭제됩니다! 계속할까요?`
     : `[${state.mapLabel}] 맵의 내 데이터를 전부 삭제할까요?`;
   if (!confirm(msg)) return;
-  if (isShared()) { mapRef.remove(); }
-  else {
-    state.spots = {}; state.vehicles = {}; state.lines = {};
-    saveSharedData();
-    rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers();
-  }
+  state.spots = {}; state.vehicles = {}; state.lines = {};
+  rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers();
+  if (isShared()) mapRef.remove(); else saveSharedData();
   state.flight = null; state.circle = null; state.enemies = {}; state.myLocation = null; state.destination = null;
   removeFlightLayer(); removeCircleLayers(); clearRouteLayers(); rebuildEnemyMarkers(); removeMyLocMarker(); removeDestMarker();
   $('#routePanel').style.display = 'none';
@@ -1286,6 +1370,7 @@ $('#clearAllBtn').addEventListener('click', () => {
   updateSyncBadges();
   loadLayerVisibility();
   applyLayerVisibility();
+  syncToolbarLayerButtons();
   buildGradeFilters();
   await buildSelectGrid();
 })();
