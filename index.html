@@ -335,6 +335,8 @@ const DELETE_PASSWORD = "1124";
   .btn-ghost:hover { color:var(--text); background:var(--bg-card); }
   #modalDeleteBtn { background:transparent; color:var(--danger); border:1px solid var(--danger); flex:0 0 auto; padding:8px 12px; }
   #modalDeleteBtn:hover { background:rgba(231,76,60,.12); }
+  #modalDangerBtn { background:transparent; color:#ff1744; border:1px solid #ff1744; flex:0 0 auto; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:12.5px; font-weight:600; font-family:inherit; }
+  #modalDangerBtn:hover { background:rgba(255,23,68,.12); }
 
   #settingsBackdrop {
     position:fixed; inset:0; background:rgba(0,0,0,.6);
@@ -483,6 +485,7 @@ const DELETE_PASSWORD = "1124";
     <div class="field"><label for="spotConsInput">👎 단점</label><textarea id="spotConsInput" placeholder="예: 진입로 좁음, 사방노출"></textarea></div>
     <div class="modal-btns">
       <button id="modalDeleteBtn" style="display:none;">🗑 삭제</button>
+      <button id="modalDangerBtn" style="display:none;">🚨 경계선</button>
       <button class="btn btn-ghost" id="cancelBtn">취소</button>
       <button class="btn btn-accent" id="saveBtn">저장</button>
     </div>
@@ -1072,7 +1075,7 @@ function addLineLayer(line) {
   // 넓은 투명 히트라인: 얇은 선도 쉽게 클릭/드래그할 수 있도록 실제 선 아래에 깔아둠
   const hit = L.polyline([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]], { color:'#000', weight:22, opacity:0 }).addTo(lineLayer);
   const poly = L.polyline([[line.a.lat,line.a.lng],[line.b.lat,line.b.lng]], {
-    color, weight: isDanger ? 4 : 5, opacity:.92, interactive:false,
+    color, weight: isDanger ? 2.5 : 3, opacity:.9, interactive:false,
     dashArray: isDanger ? '10 8' : null
   }).addTo(lineLayer);
   const h1 = L.marker([line.a.lat,line.a.lng], { icon:L.divIcon({className:'',html:`<div class="line-handle"></div>`,iconSize:[13,13],iconAnchor:[6,6]}), draggable:true, zIndexOffset:900 }).addTo(lineLayer);
@@ -1522,6 +1525,7 @@ function openAddModal() {
   $('#modalTitle').textContent = '📍 새 스팟 추가';
   $('#spotNameInput').value = ''; $('#spotProsInput').value = ''; $('#spotConsInput').value = '';
   $('#modalDeleteBtn').style.display = 'none';
+  $('#modalDangerBtn').style.display = 'none';
   buildGradeButtons();
   $('#modalBackdrop').classList.add('open');
   setTimeout(() => $('#spotNameInput').focus(), 50);
@@ -1535,6 +1539,9 @@ function openEditModal(spot) {
   $('#spotProsInput').value = spot.pros || '';
   $('#spotConsInput').value = spot.cons || '';
   $('#modalDeleteBtn').style.display = 'inline-flex';
+  $('#modalDangerBtn').style.display = 'inline-flex';
+  $('#modalDangerBtn').dataset.spotLat = spot.lat;
+  $('#modalDangerBtn').dataset.spotLng = spot.lng;
   buildGradeButtons();
   $('#modalBackdrop').classList.add('open');
 }
@@ -1562,6 +1569,17 @@ $('#modalDeleteBtn').addEventListener('click', () => {
   deleteSpot(editingSpotId);
   closeModal();
   toast('🗑 스팟 삭제됨');
+});
+$('#modalDangerBtn').addEventListener('click', () => {
+  const lat = parseFloat($('#modalDangerBtn').dataset.spotLat);
+  const lng = parseFloat($('#modalDangerBtn').dataset.spotLng);
+  closeModal();
+  setMode('line');
+  selectedLineColor = 'red';
+  $$('.color-dot').forEach(d => d.classList.toggle('selected', d.dataset.color === 'red'));
+  lineFirstPoint = L.latLng(lat, lng);
+  lineTempMarker = L.circleMarker(lineFirstPoint, { radius:6, color:LINE_COLORS.red, fillColor:LINE_COLORS.red, fillOpacity:1 }).addTo(lineLayer);
+  toast('🚨 경계할 방향(끝점)을 클릭하세요', 3500);
 });
 $('#spotNameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveBtn').click(); });
 
