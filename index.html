@@ -337,11 +337,19 @@ const DELETE_PASSWORD = "1124";
   #modalDeleteBtn:hover { background:rgba(231,76,60,.12); }
   #modalDangerBtn { background:transparent; color:#ff1744; border:1px solid #ff1744; flex:0 0 auto; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:12.5px; font-weight:600; font-family:inherit; }
   #modalDangerBtn:hover { background:rgba(255,23,68,.12); }
-  #modalDangerDeleteBtn {
-    background:transparent; color:var(--text-dim); border:1px solid var(--border);
-    flex:0 0 auto; padding:8px 10px; border-radius:6px; cursor:pointer; font-size:13px; font-family:inherit;
+  #dangerList { display:flex; flex-direction:column; gap:5px; }
+  .danger-row {
+    display:flex; align-items:center; gap:8px;
+    background:var(--bg-card); border:1px solid rgba(255,23,68,.35); border-radius:6px;
+    padding:6px 10px; font-size:12px; color:var(--text);
   }
-  #modalDangerDeleteBtn:hover { color:var(--danger); border-color:var(--danger); }
+  .danger-row .dr-icon { color:#ff1744; }
+  .danger-row .dr-label { flex:1; }
+  .danger-row .dr-del {
+    background:transparent; border:none; color:var(--text-dim); cursor:pointer;
+    font-size:13px; padding:2px 5px; border-radius:4px;
+  }
+  .danger-row .dr-del:hover { color:var(--danger); background:rgba(231,76,60,.12); }
 
   #settingsBackdrop {
     position:fixed; inset:0; background:rgba(0,0,0,.6);
@@ -488,10 +496,13 @@ const DELETE_PASSWORD = "1124";
     <div class="field"><label for="spotNameInput">스팟 이름</label><input id="spotNameInput" type="text" placeholder="예: 밀타파워 옥상"></div>
     <div class="field"><label for="spotProsInput">👍 장점</label><textarea id="spotProsInput" placeholder="예: 시야 좋음, 파밍 풍부"></textarea></div>
     <div class="field"><label for="spotConsInput">👎 단점</label><textarea id="spotConsInput" placeholder="예: 진입로 좁음, 사방노출"></textarea></div>
+    <div class="field" id="dangerListField" style="display:none;">
+      <label>🚨 경계선 (여러 개 가능)</label>
+      <div id="dangerList"></div>
+      <button id="modalDangerBtn" class="btn btn-outline" style="margin-top:6px;">🚨 + 경계선 추가</button>
+    </div>
     <div class="modal-btns">
-      <button id="modalDeleteBtn" style="display:none;">🗑 삭제</button>
-      <button id="modalDangerBtn" style="display:none;">🚨 경계선</button>
-      <button id="modalDangerDeleteBtn" style="display:none;">✕</button>
+      <button id="modalDeleteBtn" style="display:none;">🗑 스팟 삭제</button>
       <button class="btn btn-ghost" id="cancelBtn">취소</button>
       <button class="btn btn-accent" id="saveBtn">저장</button>
     </div>
@@ -595,7 +606,7 @@ let mode=null, flightFirstPoint=null, lineFirstPoint=null, pendingLatLng=null;
 let selectedGrade='S', selectedLineColor='yellow', editingSpotId=null;
 let spotDangerTargetId = null; // 경계선 두 점을 기다리는 중인 스팟 id
 let dangerFirstPoint = null; // 경계선 시작점(첫 클릭) 임시 저장
-let dangerPreviewLine = null; // 스팟에 마우스 올렸을 때만 보이는 경계선 (호버 프리뷰)
+let dangerPreviewLines = []; // 스팟에 마우스 올렸을 때만 보이는 경계선들 (호버 프리뷰, 여러 개 가능)
 let draggingLine = null; // { line, origA, origB, startLatLng, redraw } — 선 전체 드래그용 전역 상태
 let pendingLineDrag = null; // 아직 임계값을 넘지 않은 드래그 후보 (단순 클릭과 구분하기 위함)
 const DRAG_THRESHOLD_PX = 5;
@@ -1024,13 +1035,17 @@ function spotTooltipHtml(spot) {
 }
 function showDangerPreview(spot) {
   hideDangerPreview();
-  if (!spot.dangerLine) return;
-  dangerPreviewLine = L.polyline([[spot.dangerLine.a.lat,spot.dangerLine.a.lng],[spot.dangerLine.b.lat,spot.dangerLine.b.lng]], {
-    color: LINE_COLORS.red, weight:2.5, dashArray:'10 8', opacity:.95, interactive:false
-  }).addTo(map);
+  if (!spot.dangerLines) return;
+  Object.values(spot.dangerLines).forEach(dl => {
+    const line = L.polyline([[dl.a.lat,dl.a.lng],[dl.b.lat,dl.b.lng]], {
+      color: LINE_COLORS.red, weight:2.5, dashArray:'10 8', opacity:.95, interactive:false
+    }).addTo(map);
+    dangerPreviewLines.push(line);
+  });
 }
 function hideDangerPreview() {
-  if (dangerPreviewLine) { map.removeLayer(dangerPreviewLine); dangerPreviewLine = null; }
+  dangerPreviewLines.forEach(l => map.removeLayer(l));
+  dangerPreviewLines = [];
 }
 function addSpotMarker(spot) {
   const m = L.marker([spot.lat, spot.lng], { icon:makeGradeIcon(spot.grade), riseOnHover:true }).addTo(spotLayer);
@@ -1457,12 +1472,14 @@ function onMapClick(e) {
       toast('🚨 이제 끝점을 클릭하세요', 3200);
     } else if (spotDangerTargetId && state.spots[spotDangerTargetId]) {
       const spot = state.spots[spotDangerTargetId];
-      spot.dangerLine = {
+      if (!spot.dangerLines) spot.dangerLines = {};
+      const lineId = uid();
+      spot.dangerLines[lineId] = {
         a: { lat: dangerFirstPoint.lat, lng: dangerFirstPoint.lng },
         b: { lat: e.latlng.lat, lng: e.latlng.lng }
       };
       writeSpot(spot);
-      toast('🚨 경계선 저장됨 (스팟에 마우스를 올리면 보여요)');
+      toast('🚨 경계선 저장됨 (스팟에 마우스를 올리면 보여요) — 계속 추가하려면 다시 스팟을 눌러 "경계선 추가"');
       dangerFirstPoint = null;
       spotDangerTargetId = null;
       setMode(null);
@@ -1567,13 +1584,30 @@ function buildGradeButtons() {
     gs.appendChild(b);
   });
 }
+function renderDangerList(spot) {
+  const wrap = $('#dangerList');
+  wrap.innerHTML = '';
+  const entries = Object.entries(spot.dangerLines || {});
+  entries.forEach(([id, dl], i) => {
+    const row = document.createElement('div');
+    row.className = 'danger-row';
+    row.innerHTML = `<span class="dr-icon">🚨</span><span class="dr-label">경계선 ${i+1}</span><button class="dr-del" data-id="${id}">✕</button>`;
+    row.querySelector('.dr-del').addEventListener('click', () => {
+      delete spot.dangerLines[id];
+      writeSpot(spot);
+      renderDangerList(spot);
+      toast('🗑 경계선 삭제됨');
+    });
+    wrap.appendChild(row);
+  });
+  if (!entries.length) wrap.innerHTML = '<div class="hc-empty" style="font-size:11.5px;">등록된 경계선이 없어요</div>';
+}
 function openAddModal() {
   editingSpotId = null; selectedGrade = 'S';
   $('#modalTitle').textContent = '📍 새 스팟 추가';
   $('#spotNameInput').value = ''; $('#spotProsInput').value = ''; $('#spotConsInput').value = '';
   $('#modalDeleteBtn').style.display = 'none';
-  $('#modalDangerBtn').style.display = 'none';
-  $('#modalDangerDeleteBtn').style.display = 'none';
+  $('#dangerListField').style.display = 'none';
   buildGradeButtons();
   $('#modalBackdrop').classList.add('open');
   setTimeout(() => $('#spotNameInput').focus(), 50);
@@ -1587,9 +1621,8 @@ function openEditModal(spot) {
   $('#spotProsInput').value = spot.pros || '';
   $('#spotConsInput').value = spot.cons || '';
   $('#modalDeleteBtn').style.display = 'inline-flex';
-  $('#modalDangerBtn').style.display = 'inline-flex';
-  $('#modalDangerBtn').textContent = spot.dangerLine ? '🚨 경계선 다시긋기' : '🚨 경계선 추가';
-  $('#modalDangerDeleteBtn').style.display = spot.dangerLine ? 'inline-flex' : 'none';
+  $('#dangerListField').style.display = 'block';
+  renderDangerList(spot);
   buildGradeButtons();
   $('#modalBackdrop').classList.add('open');
 }
@@ -1624,17 +1657,6 @@ $('#modalDangerBtn').addEventListener('click', () => {
   setMode('spotdanger');
   spotDangerTargetId = spotId;
   toast('🚨 경계선 시작점을 클릭하세요', 3200);
-});
-$('#modalDangerDeleteBtn').addEventListener('click', () => {
-  if (!editingSpotId) return;
-  const spot = state.spots[editingSpotId];
-  if (!spot) return;
-  if (!confirm('이 스팟의 경계선을 삭제할까요?')) return;
-  delete spot.dangerLine;
-  writeSpot(spot);
-  $('#modalDangerDeleteBtn').style.display = 'none';
-  $('#modalDangerBtn').textContent = '🚨 경계선 추가';
-  toast('🗑 경계선 삭제됨');
 });
 $('#spotNameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveBtn').click(); });
 
