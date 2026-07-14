@@ -31,6 +31,7 @@ const DELETE_PASSWORD = "1124";
     --line-yellow:#f1c40f; --line-blue:#3498db; --line-green:#2ecc71; --line-orange:#ff8c1a; --line-red:#ff1744;
     --myloc:#2196f3;
     --team-1:#2196f3; --team-2:#2ecc71; --team-3:#ff9800; --team-4:#e91e63;
+    --secret:#8e24aa;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body { height:100%; overflow:hidden; }
@@ -215,6 +216,13 @@ const DELETE_PASSWORD = "1124";
     background:var(--vehicle); border:2px solid rgba(255,255,255,.85);
     box-shadow:0 2px 8px rgba(0,0,0,.6); cursor:grab; transition:transform .1s;
   }
+  .secret-pin {
+    display:flex; align-items:center; justify-content:center;
+    width:28px; height:28px; border-radius:50%; font-size:15px;
+    background:var(--secret); border:2px solid gold;
+    box-shadow:0 0 8px rgba(142,36,170,.7), 0 2px 8px rgba(0,0,0,.6); cursor:grab; transition:transform .1s;
+  }
+  .secret-pin:hover { transform:scale(1.18); }
   .vehicle-pin:hover { transform:scale(1.18); }
   .jump-pin {
     display:flex; align-items:center; justify-content:center;
@@ -434,6 +442,7 @@ const DELETE_PASSWORD = "1124";
     ⭐ 툴바 버튼 <b style="color:var(--accent)">더블클릭</b> = 그 항목 지도 표시 on/off<br>
     👥 팀 위치는 1~4번, 번호당 1개만 유지 · 모두에게 실시간 공유<br>
     🏷 지명은 제목(빨강·큼)/소제목(핑크·작음) 직접 입력 가능<br>
+    🔐 비밀의방은 차량처럼 드래그 이동 · 더블클릭 삭제<br>
     🔄 리셋(우측 하단)은 스팟·차량·지명은 그대로 두고<br>비행선·선·적표시·팀 위치를 초기화
   </div>
 </aside>
@@ -444,6 +453,7 @@ const DELETE_PASSWORD = "1124";
   <div id="toolbar">
     <button class="mode-btn" data-mode="spot">📍 스팟</button>
     <button class="mode-btn" data-mode="vehicle">🚗 차량</button>
+    <button class="mode-btn" data-mode="secret">🔐 비밀의방</button>
     <button class="mode-btn" data-mode="flight">✈️ 비행선</button>
     <button class="mode-btn" data-mode="line">➖ 선긋기</button>
     <button class="mode-btn" data-mode="enemy">🔴 적 표시</button>
@@ -555,7 +565,7 @@ const PRESET_MAPS = [
 ];
 const HIGH_URL = k => `https://media.githubusercontent.com/media/pubg/api-assets/master/Assets/Maps/${k}_Main_High_Res.png`;
 
-const MODE_LAYER_MAP = { spot:'spots', vehicle:'vehicles', flight:'flight', line:'lines', enemy:'enemies', team:'team', label:'labels' };
+const MODE_LAYER_MAP = { spot:'spots', vehicle:'vehicles', flight:'flight', line:'lines', enemy:'enemies', team:'team', label:'labels', secret:'secretRooms' };
 
 const LAYER_DEFS = [
   { key:'spots', label:'📍 스팟 핀' },
@@ -565,7 +575,8 @@ const LAYER_DEFS = [
   { key:'circle', label:'⭕ 서클' },
   { key:'enemies', label:'🔴 적 표시' },
   { key:'team', label:'👥 팀 위치' },
-  { key:'labels', label:'🏷 지명' }
+  { key:'labels', label:'🏷 지명' },
+  { key:'secretRooms', label:'🔐 비밀의방' }
 ];
 
 // ---------- Firebase ----------
@@ -584,7 +595,7 @@ const isShared = () => !!db;
 // ---------- 상태 ----------
 let state = {
   mapKey:null, mapLabel:'', kmSize:8, imgW:0, imgH:0,
-  spots:{}, vehicles:{}, lines:{}, team:{}, labels:{},   // 공유
+  spots:{}, vehicles:{}, lines:{}, team:{}, labels:{}, secretRooms:{},   // 공유
   flight:null, circle:null, enemies:{}  // 로컬(판 단위)
 };
 let layerVisibility = {};
@@ -592,9 +603,9 @@ let gradeFilter = { S:true,A:true,B:true,C:true,D:true,E:true,F:true };
 
 let map=null, imageLayer=null;
 // 레이어 그룹 (표시 설정으로 add/remove 되는 실제 지도 레이어)
-let spotLayer, vehicleLayer, lineLayer, enemyLayer, flightGroup, circleGroup, teamLayer, labelLayer;
+let spotLayer, vehicleLayer, lineLayer, enemyLayer, flightGroup, circleGroup, teamLayer, labelLayer, secretLayer;
 
-let markers={}, vehicleMarkers={}, lineLayers={}, enemyMarkers={};
+let markers={}, vehicleMarkers={}, lineLayers={}, enemyMarkers={}, secretMarkers={};
 let flightLine=null, flightTempMarker=null, lineTempMarker=null;
 let circleShape=null, circleCenterHandle=null, circleEdgeHandle=null;
 let teamMarkers={};
@@ -659,7 +670,7 @@ function localKey() { return 'pubg_v7_data_' + state.mapKey; }
 function localTacticalKey() { return 'pubg_v7_tact_' + state.mapKey; }
 function saveSharedData() {
   if (isShared()) return;
-  try { localStorage.setItem(localKey(), JSON.stringify({ spots:state.spots, vehicles:state.vehicles, lines:state.lines, team:state.team, labels:state.labels })); }
+  try { localStorage.setItem(localKey(), JSON.stringify({ spots:state.spots, vehicles:state.vehicles, lines:state.lines, team:state.team, labels:state.labels, secretRooms:state.secretRooms })); }
   catch(e) { toast('❌ 저장 실패'); }
 }
 function saveTactical() {
@@ -672,9 +683,9 @@ function saveTactical() {
 function loadLocalData() {
   try {
     const raw = localStorage.getItem(localKey());
-    if (raw) { const d = JSON.parse(raw); state.spots=d.spots||{}; state.vehicles=d.vehicles||{}; state.lines=d.lines||{}; state.team=d.team||{}; state.labels=d.labels||{}; }
-    else { state.spots={}; state.vehicles={}; state.lines={}; state.team={}; state.labels={}; }
-  } catch(e) { state.spots={}; state.vehicles={}; state.lines={}; state.team={}; state.labels={}; }
+    if (raw) { const d = JSON.parse(raw); state.spots=d.spots||{}; state.vehicles=d.vehicles||{}; state.lines=d.lines||{}; state.team=d.team||{}; state.labels=d.labels||{}; state.secretRooms=d.secretRooms||{}; }
+    else { state.spots={}; state.vehicles={}; state.lines={}; state.team={}; state.labels={}; state.secretRooms={}; }
+  } catch(e) { state.spots={}; state.vehicles={}; state.lines={}; state.team={}; state.labels={}; state.secretRooms={}; }
   // 전술 정보(비행선/서클/적표시)는 페이지를 새로 열 때마다 항상 새 상태로 시작
   // (스팟 · 차량 · 팀 위치 · 지명은 위에서 그대로 유지됨 — 영구/공유 데이터이므로)
   state.flight=null; state.circle=null; state.enemies={};
@@ -705,6 +716,17 @@ function deleteVehicle(id) {
   delete state.vehicles[id];
   if (vehicleMarkers[id]) { vehicleLayer.removeLayer(vehicleMarkers[id]); delete vehicleMarkers[id]; }
   if (isShared()) mapRef.child('vehicles/'+id).remove(); else saveSharedData();
+}
+function writeSecretRoom(sr) {
+  state.secretRooms[sr.id] = sr;
+  if (secretMarkers[sr.id]) { secretLayer.removeLayer(secretMarkers[sr.id]); delete secretMarkers[sr.id]; }
+  addSecretRoomMarker(sr);
+  if (isShared()) mapRef.child('secretRooms/'+sr.id).set(sr); else saveSharedData();
+}
+function deleteSecretRoom(id) {
+  delete state.secretRooms[id];
+  if (secretMarkers[id]) { secretLayer.removeLayer(secretMarkers[id]); delete secretMarkers[id]; }
+  if (isShared()) mapRef.child('secretRooms/'+id).remove(); else saveSharedData();
 }
 function writeLine(line) {
   state.lines[line.id] = line;
@@ -745,8 +767,8 @@ function subscribeMap() {
   mapRef = db.ref('maps/' + state.mapKey);
   mapRef.on('value', snap => {
     const d = snap.val() || {};
-    state.spots = d.spots || {}; state.vehicles = d.vehicles || {}; state.lines = d.lines || {}; state.team = d.team || {}; state.labels = d.labels || {};
-    rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers();
+    state.spots = d.spots || {}; state.vehicles = d.vehicles || {}; state.lines = d.lines || {}; state.team = d.team || {}; state.labels = d.labels || {}; state.secretRooms = d.secretRooms || {};
+    rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers(); rebuildSecretRoomMarkers();
     applyCircleFilter();
   });
 }
@@ -764,7 +786,7 @@ function loadLayerVisibility() {
 }
 function saveLayerVisibility() { localStorage.setItem(LAYER_KEY, JSON.stringify(layerVisibility)); }
 function layerGroupOf(key) {
-  return { spots:spotLayer, vehicles:vehicleLayer, lines:lineLayer, flight:flightGroup, circle:circleGroup, enemies:enemyLayer, team:teamLayer, labels:labelLayer }[key];
+  return { spots:spotLayer, vehicles:vehicleLayer, lines:lineLayer, flight:flightGroup, circle:circleGroup, enemies:enemyLayer, team:teamLayer, labels:labelLayer, secretRooms:secretLayer }[key];
 }
 function applyLayerVisibility() {
   LAYER_DEFS.forEach(d => {
@@ -866,6 +888,7 @@ function initMap() {
   circleGroup = L.layerGroup().addTo(map);
   teamLayer = L.layerGroup().addTo(map);
   labelLayer = L.layerGroup().addTo(map);
+  secretLayer = L.layerGroup().addTo(map);
 }
 function displayImage(url, w, h) {
   if (imageLayer) { map.removeLayer(imageLayer); imageLayer = null; }
@@ -945,8 +968,8 @@ function finishEnterMap(preset) {
   $('#currentMapName').textContent = '🗺 ' + preset.label;
   clearRouteLayers(); removeFlightLayer(); removeCircleLayers();
   $('#routePanel').style.display = 'none';
-  if (isShared()) { loadLocalData(); state.spots={}; state.vehicles={}; state.lines={}; state.team={}; state.labels={}; subscribeMap(); }
-  else { loadLocalData(); rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers(); }
+  if (isShared()) { loadLocalData(); state.spots={}; state.vehicles={}; state.lines={}; state.team={}; state.labels={}; state.secretRooms={}; subscribeMap(); }
+  else { loadLocalData(); rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers(); rebuildSecretRoomMarkers(); }
   rebuildEnemyMarkers();
   drawFlightLine(); drawCircle();
   applyCircleFilter();
@@ -984,6 +1007,7 @@ function extendFlightLine(a, b) {
 const makeGradeIcon = g => L.divIcon({ className:'', html:`<div class="grade-pin" style="background:${GRADE_COLORS[g]||'#888'}">${g}</div>`, iconSize:[32,32], iconAnchor:[16,16] });
 const makeDotIcon = (grade) => L.divIcon({ className:'', html:`<div class="spot-dot" style="background:${GRADE_COLORS[grade]||'#888'}"></div>`, iconSize:[12,12], iconAnchor:[6,6] });
 const makeVehicleIcon = () => L.divIcon({ className:'', html:`<div class="vehicle-pin">🚗</div>`, iconSize:[28,28], iconAnchor:[14,14] });
+const makeSecretIcon = () => L.divIcon({ className:'', html:`<div class="secret-pin">🔐</div>`, iconSize:[28,28], iconAnchor:[14,14] });
 const makeEnemyIcon = () => L.divIcon({ className:'', html:`<div class="enemy-pin"></div>`, iconSize:[18,18], iconAnchor:[9,9] });
 const makeMyLocIcon = () => L.divIcon({ className:'', html:`<div class="myloc-pin">😀</div>`, iconSize:[26,26], iconAnchor:[13,13] });
 const TEAM_COLOR_VARS = { 1:'var(--team-1)', 2:'var(--team-2)', 3:'var(--team-3)', 4:'var(--team-4)' };
@@ -1078,6 +1102,24 @@ function addVehicleMarker(v) {
     toast('🗑 차량 스폰 삭제됨');
   });
   vehicleMarkers[v.id] = m;
+}
+function addSecretRoomMarker(sr) {
+  const m = L.marker([sr.lat, sr.lng], { icon:makeSecretIcon(), riseOnHover:true, draggable:true }).addTo(secretLayer);
+  bindHoverCard(m, () => `<div class="hc-head"><span style="font-size:16px">🔐</span><span class="hc-name">비밀의 방</span></div>
+     <div class="hc-empty">드래그: 위치 조정 · 더블클릭: 삭제</div>`);
+  m.on('dragend', () => { const ll = m.getLatLng(); sr.lat=ll.lat; sr.lng=ll.lng; writeSecretRoom(sr); });
+  m.on('dblclick', (e) => {
+    L.DomEvent.stopPropagation(e);
+    hideHoverCard();
+    deleteSecretRoom(sr.id);
+    toast('🗑 비밀의 방 삭제됨');
+  });
+  secretMarkers[sr.id] = m;
+}
+function rebuildSecretRoomMarkers() {
+  Object.values(secretMarkers).forEach(m => secretLayer.removeLayer(m));
+  secretMarkers = {};
+  Object.values(state.secretRooms).forEach(addSecretRoomMarker);
 }
 function addEnemyMarker(en) {
   const m = L.marker([en.lat, en.lng], { icon:makeEnemyIcon(), riseOnHover:true, draggable:true }).addTo(enemyLayer);
@@ -1398,6 +1440,7 @@ const HINTS = {
   spot:'지도를 클릭하면 스팟을 추가합니다 (지도 더블클릭으로도 추가 가능)',
   spotdanger:'경계선의 시작점 → 끝점 순서로 2번 클릭하세요 (스팟에 마우스를 올릴 때만 보여요)',
   vehicle:'차가 고정으로 젠 되는 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
+  secret:'비밀의 방 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
   flight:'비행선 시작점 → 끝점 순서로 2번 클릭하세요 (더블클릭으로 삭제)',
   line:'색상을 고르고 시작점 → 끝점 순서로 2번 클릭하세요 (몸통 드래그 이동, 더블클릭 삭제) · 빨강=경계선(점선)',
   enemy:'적을 목격한 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
@@ -1497,6 +1540,10 @@ function onMapClick(e) {
     const v = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng };
     writeVehicle(v);
     toast('🚗 차량 스폰 추가');
+  } else if (mode === 'secret') {
+    const sr = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng };
+    writeSecretRoom(sr);
+    toast('🔐 비밀의 방 추가 (드래그로 위치 조정 가능)');
   } else if (mode === 'enemy') {
     const en = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng };
     state.enemies[en.id] = en;
@@ -1670,8 +1717,8 @@ $('#clearAllBtn').addEventListener('click', () => {
     ? `[${state.mapLabel}] 맵의 공유 데이터(스팟/차량/선)를 전부 삭제합니다.\n⚠️ 모든 사용자에게서 삭제됩니다! 계속할까요?`
     : `[${state.mapLabel}] 맵의 내 데이터를 전부 삭제할까요?`;
   if (!confirm(msg)) return;
-  state.spots = {}; state.vehicles = {}; state.lines = {}; state.team = {}; state.labels = {};
-  rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers();
+  state.spots = {}; state.vehicles = {}; state.lines = {}; state.team = {}; state.labels = {}; state.secretRooms = {};
+  rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers(); rebuildSecretRoomMarkers();
   if (isShared()) { mapRef.remove(); } else saveSharedData();
   state.flight = null; state.circle = null; state.enemies = {};
   removeFlightLayer(); removeCircleLayers(); clearRouteLayers(); rebuildEnemyMarkers();
