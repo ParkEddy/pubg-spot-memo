@@ -258,10 +258,11 @@ const DELETE_PASSWORD = "1124";
   }
   /* ===== 커스텀 호버 카드 (Leaflet 툴팁 미사용 — CSS 충돌/세로 줄바꿈 문제 원천 차단) ===== */
   #hoverCard {
-    position:fixed; z-index:5500; pointer-events:none;
+    position:absolute; left:50%; bottom:20px; transform:translateX(-50%);
+    z-index:1200; pointer-events:none;
     background:rgba(18,18,20,.98); border:1px solid var(--accent); border-radius:9px;
-    padding:11px 14px; box-shadow:0 6px 22px rgba(0,0,0,.65);
-    min-width:210px; max-width:320px; display:none;
+    padding:11px 16px; box-shadow:0 6px 22px rgba(0,0,0,.65);
+    min-width:240px; max-width:min(480px, calc(100% - 32px)); display:none;
   }
   #hoverCard, #hoverCard * {
     white-space:normal !important; word-break:keep-all !important; overflow-wrap:break-word !important;
@@ -572,6 +573,7 @@ const DELETE_PASSWORD = "1124";
   </div>
 
   <button id="resetFab" title="비행선/선긋기/적표시/팀위치 초기화">🔄 리셋</button>
+  <div id="hoverCard"></div>
 </main>
 
 <div id="modalBackdrop">
@@ -617,8 +619,6 @@ const DELETE_PASSWORD = "1124";
     <button class="btn btn-accent" id="settingsCloseBtn">닫기</button>
   </div>
 </div>
-
-<div id="hoverCard"></div>
 
 <div id="toast"></div>
 
@@ -1139,29 +1139,15 @@ const TEAM_COLOR_VARS = { 1:'var(--team-1)', 2:'var(--team-2)', 3:'var(--team-3)
 const makeTeamIcon = (slot) => L.divIcon({ className:'', html:`<div class="team-pin" style="background:${TEAM_COLOR_VARS[slot]}">${slot}</div>`, iconSize:[28,28], iconAnchor:[14,14] });
 
 // ---------- 커스텀 호버 카드 (Leaflet 툴팁 대신 사용 — 가로 배치 고정, CSS 충돌 없음) ----------
-function showHoverCard(html, clientX, clientY, extraClass) {
+function showHoverCard(html, extraClass) {
   const card = $('#hoverCard');
   card.className = extraClass || '';
   card.innerHTML = html;
   card.style.display = 'block';
-  card.style.left = (clientX + 16) + 'px';
-  card.style.top = (clientY + 16) + 'px';
-  requestAnimationFrame(() => {
-    const rect = card.getBoundingClientRect();
-    let left = clientX + 16, top = clientY + 16;
-    if (rect.right > window.innerWidth - 8) left = clientX - rect.width - 16;
-    if (rect.bottom > window.innerHeight - 8) top = clientY - rect.height - 16;
-    card.style.left = Math.max(8, left) + 'px';
-    card.style.top = Math.max(8, top) + 'px';
-  });
 }
 function hideHoverCard() { $('#hoverCard').style.display = 'none'; }
 function bindHoverCard(layer, htmlFn, extraClass) {
-  layer.on('mouseover', (e) => showHoverCard(typeof htmlFn === 'function' ? htmlFn() : htmlFn, e.originalEvent.clientX, e.originalEvent.clientY, extraClass));
-  layer.on('mousemove', (e) => {
-    const card = $('#hoverCard');
-    if (card.style.display === 'block') { card.style.left = (e.originalEvent.clientX + 16) + 'px'; card.style.top = (e.originalEvent.clientY + 16) + 'px'; }
-  });
+  layer.on('mouseover', () => showHoverCard(typeof htmlFn === 'function' ? htmlFn() : htmlFn, extraClass));
   layer.on('mouseout', hideHoverCard);
   layer.on('dragstart', hideHoverCard);
 }
