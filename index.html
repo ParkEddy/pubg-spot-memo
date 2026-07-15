@@ -381,6 +381,25 @@ const DELETE_PASSWORD = "1124";
     font-size:13px; padding:2px 5px; border-radius:4px;
   }
   .teampos-row .tp-del:hover { color:var(--danger); background:rgba(231,76,60,.12); }
+  #modalAdvanceBtn { background:transparent; color:#00e676; border:1px solid #00e676; flex:0 0 auto; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:12.5px; font-weight:600; font-family:inherit; }
+  #modalAdvanceBtn:hover { background:rgba(0,230,118,.12); }
+  #advanceList { display:flex; flex-direction:column; gap:5px; }
+  .advance-row {
+    display:flex; align-items:center; gap:8px;
+    background:var(--bg-card); border:1px solid rgba(0,230,118,.35); border-radius:6px;
+    padding:6px 10px; font-size:12px; color:var(--text);
+  }
+  .advance-row .ar-icon { color:#00e676; }
+  .advance-row .ar-label { flex:1; }
+  .advance-row .ar-del {
+    background:transparent; border:none; color:var(--text-dim); cursor:pointer;
+    font-size:13px; padding:2px 5px; border-radius:4px;
+  }
+  .advance-row .ar-del:hover { color:var(--danger); background:rgba(231,76,60,.12); }
+  .advance-arrowhead {
+    font-size:20px; color:#00e676; text-shadow:0 0 4px #000, 0 0 7px #000, 1px 1px 2px #000;
+    pointer-events:none; display:flex; align-items:center; justify-content:center; width:100%; height:100%;
+  }
 
   #settingsBackdrop {
     position:fixed; inset:0; background:rgba(0,0,0,.6);
@@ -550,6 +569,11 @@ const DELETE_PASSWORD = "1124";
       <div id="teamPosList"></div>
       <button id="modalTeamPosBtn" class="btn btn-outline" style="margin-top:6px;">👥 + 팀원 배치 추가</button>
     </div>
+    <div class="field" id="advanceListField" style="display:none;">
+      <label>➡️ 진행 방향 (여러 개 가능)</label>
+      <div id="advanceList"></div>
+      <button id="modalAdvanceBtn" class="btn btn-outline" style="margin-top:6px;">➡️ + 진행 방향 추가</button>
+    </div>
     <div class="modal-btns">
       <button id="modalDeleteBtn" style="display:none;">🗑 스팟 삭제</button>
       <button class="btn btn-ghost" id="cancelBtn">취소</button>
@@ -660,6 +684,9 @@ let dangerPreviewLines = []; // 스팟에 마우스 올렸을 때만 보이는 �
 let spotTeamPosTargetId = null; // 팀원 배치 위치를 기다리는 중인 스팟 id
 let spotTeamPosSlot = null; // 배치할 팀원 번호 (1~4)
 let teamPosPreviewMarkers = []; // 스팟에 마우스 올렸을 때만 보이는 팀원 배치 마커들 (호버 프리뷰)
+let spotAdvanceTargetId = null; // 진행방향 두 점을 기다리는 중인 스팟 id
+let advanceFirstPoint = null; // 진행방향 시작점(첫 클릭) 임시 저장
+let advancePreviewLines = []; // 스팟에 마우스 올렸을 때만 보이는 진행방향 화살표들 (호버 프리뷰)
 let draggingLine = null; // { line, origA, origB, startLatLng, redraw } — 선 전체 드래그용 전역 상태
 let pendingLineDrag = null; // 아직 임계값을 넘지 않은 드래그 후보 (단순 클릭과 구분하기 위함)
 const DRAG_THRESHOLD_PX = 5;
@@ -1139,11 +1166,42 @@ function hideTeamPosPreview() {
   teamPosPreviewMarkers.forEach(m => map.removeLayer(m));
   teamPosPreviewMarkers = [];
 }
+function showAdvancePreview(spot) {
+  hideAdvancePreview();
+  if (!spot.advanceLines) return;
+  Object.values(spot.advanceLines).forEach(al => {
+    const line = L.polyline([[al.a.lat,al.a.lng],[al.b.lat,al.b.lng]], {
+      color:'#00e676', weight:3, opacity:.95, interactive:false
+    }).addTo(map);
+    advancePreviewLines.push(line);
+    const dx = al.b.lng - al.a.lng;
+    const dy = -(al.b.lat - al.a.lat); // 위도 증가 = 화면 위쪽이므로 부호 반전
+    const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+    const arrow = L.marker([al.b.lat, al.b.lng], {
+      icon: L.divIcon({
+        className:'', iconSize:[24,24], iconAnchor:[12,12],
+        html:`<div class="advance-arrowhead" style="transform:rotate(${angleDeg}deg)">➤</div>`
+      }),
+      interactive:false
+    }).addTo(map);
+    advancePreviewLines.push(arrow);
+  });
+}
+function hideAdvancePreview() {
+  advancePreviewLines.forEach(l => map.removeLayer(l));
+  advancePreviewLines = [];
+}
 function addSpotMarker(spot) {
-  const m = L.marker([spot.lat, spot.lng], { icon:makeGradeIcon(spot.grade), riseOnHover:true }).addTo(spotLayer);
+  const m = L.marker([spot.lat, spot.lng], { icon:makeGradeIcon(spot.grade), riseOnHover:true, draggable:true }).addTo(spotLayer);
   bindHoverCard(m, () => spotTooltipHtml(spot));
-  m.on('mouseover', () => { showDangerPreview(spot); showTeamPosPreview(spot); });
-  m.on('mouseout', () => { hideDangerPreview(); hideTeamPosPreview(); });
+  m.on('mouseover', () => { showDangerPreview(spot); showTeamPosPreview(spot); showAdvancePreview(spot); });
+  m.on('mouseout', () => { hideDangerPreview(); hideTeamPosPreview(); hideAdvancePreview(); });
+  m.on('dragend', () => {
+    const ll = m.getLatLng();
+    spot.lat = ll.lat; spot.lng = ll.lng;
+    if (isShared()) mapRef.child('spots/'+spot.id).set(spot); else { state.spots[spot.id] = spot; saveSharedData(); }
+    applyCircleFilter();
+  });
   m.on('click', (e) => {
     L.DomEvent.stopPropagation(e);
     hideHoverCard();
@@ -1154,6 +1212,7 @@ function addSpotMarker(spot) {
     hideHoverCard();
     hideDangerPreview();
     hideTeamPosPreview();
+    hideAdvancePreview();
     if (deleteSpot(spot.id)) toast('🗑 스팟 삭제됨');
   });
   markers[spot.id] = m;
@@ -1503,6 +1562,7 @@ const HINTS = {
   spot:'지도를 클릭하면 스팟을 추가합니다 (지도 더블클릭으로도 추가 가능)',
   spotdanger:'경계선의 시작점 → 끝점 순서로 2번 클릭하세요 (스팟에 마우스를 올릴 때만 보여요)',
   spotteampos:'팀원이 배치될 위치를 클릭하세요 (스팟에 마우스를 올릴 때만 보여요)',
+  spotadvance:'진행 방향의 시작점 → 끝점 순서로 2번 클릭하세요 (스팟에 마우스를 올릴 때만 화살표가 보여요)',
   vehicle:'차가 고정으로 젠 되는 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
   secret:'비밀의 방 위치를 클릭하세요 (드래그 이동 · 더블클릭 삭제)',
   flight:'비행선 시작점 → 끝점 순서로 2번 클릭하세요 (더블클릭으로 삭제)',
@@ -1515,6 +1575,7 @@ function setMode(m) {
   mode = m;
   flightFirstPoint = null; lineFirstPoint = null; dangerFirstPoint = null; spotDangerTargetId = null;
   spotTeamPosTargetId = null; spotTeamPosSlot = null;
+  advanceFirstPoint = null; spotAdvanceTargetId = null;
   if (flightTempMarker) { flightGroup.removeLayer(flightTempMarker); flightTempMarker = null; }
   if (lineTempMarker) { lineLayer.removeLayer(lineTempMarker); lineTempMarker = null; }
   $$('.mode-btn[data-mode]').forEach(b => {
@@ -1583,6 +1644,32 @@ function onMapClick(e) {
     }
     spotTeamPosTargetId = null; spotTeamPosSlot = null;
     setMode(null);
+    return;
+  }
+  if (mode === 'spotadvance') {
+    if (!advanceFirstPoint) {
+      advanceFirstPoint = e.latlng;
+      if (lineTempMarker) { lineLayer.removeLayer(lineTempMarker); lineTempMarker = null; }
+      lineTempMarker = L.circleMarker(advanceFirstPoint, { radius:7, color:'#00e676', fillColor:'#00e676', fillOpacity:1 }).addTo(lineLayer);
+      toast('➡️ 이제 끝점을 클릭하세요', 3200);
+    } else if (spotAdvanceTargetId && state.spots[spotAdvanceTargetId]) {
+      const spot = state.spots[spotAdvanceTargetId];
+      if (!spot.advanceLines) spot.advanceLines = {};
+      const lineId = uid();
+      spot.advanceLines[lineId] = {
+        a: { lat: advanceFirstPoint.lat, lng: advanceFirstPoint.lng },
+        b: { lat: e.latlng.lat, lng: e.latlng.lng }
+      };
+      writeSpot(spot);
+      toast('➡️ 진행 방향 저장됨 (스팟에 마우스를 올리면 보여요) — 계속 추가하려면 다시 "진행 방향 추가"');
+      advanceFirstPoint = null;
+      spotAdvanceTargetId = null;
+      setMode(null);
+    } else {
+      advanceFirstPoint = null;
+      spotAdvanceTargetId = null;
+      setMode(null);
+    }
     return;
   }
   if (mode === 'spotdanger') {
@@ -1746,6 +1833,24 @@ function renderTeamPosList(spot) {
   });
   if (!entries.length) wrap.innerHTML = '<div class="hc-empty" style="font-size:11.5px;">등록된 팀원 배치가 없어요</div>';
 }
+function renderAdvanceList(spot) {
+  const wrap = $('#advanceList');
+  wrap.innerHTML = '';
+  const entries = Object.entries(spot.advanceLines || {});
+  entries.forEach(([id, al], i) => {
+    const row = document.createElement('div');
+    row.className = 'advance-row';
+    row.innerHTML = `<span class="ar-icon">➡️</span><span class="ar-label">진행 방향 ${i+1}</span><button class="ar-del" data-id="${id}">✕</button>`;
+    row.querySelector('.ar-del').addEventListener('click', () => {
+      delete spot.advanceLines[id];
+      writeSpot(spot);
+      renderAdvanceList(spot);
+      toast('🗑 진행 방향 삭제됨');
+    });
+    wrap.appendChild(row);
+  });
+  if (!entries.length) wrap.innerHTML = '<div class="hc-empty" style="font-size:11.5px;">등록된 진행 방향이 없어요</div>';
+}
 function openAddModal() {
   editingSpotId = null; selectedGrade = 'S';
   $('#modalTitle').textContent = '📍 새 스팟 추가';
@@ -1753,6 +1858,7 @@ function openAddModal() {
   $('#modalDeleteBtn').style.display = 'none';
   $('#dangerListField').style.display = 'none';
   $('#teamPosListField').style.display = 'none';
+  $('#advanceListField').style.display = 'none';
   buildGradeButtons();
   $('#modalBackdrop').classList.add('open');
   setTimeout(() => $('#spotNameInput').focus(), 50);
@@ -1770,6 +1876,8 @@ function openEditModal(spot) {
   renderDangerList(spot);
   $('#teamPosListField').style.display = 'block';
   renderTeamPosList(spot);
+  $('#advanceListField').style.display = 'block';
+  renderAdvanceList(spot);
   buildGradeButtons();
   $('#modalBackdrop').classList.add('open');
 }
@@ -1817,6 +1925,13 @@ $('#modalTeamPosBtn').addEventListener('click', () => {
   spotTeamPosTargetId = spotId;
   spotTeamPosSlot = slot;
   toast(`👤 ${slot}번 팀원이 배치될 위치를 클릭하세요`, 3200);
+});
+$('#modalAdvanceBtn').addEventListener('click', () => {
+  const spotId = editingSpotId;
+  closeModal();
+  setMode('spotadvance');
+  spotAdvanceTargetId = spotId;
+  toast('➡️ 진행 방향 시작점을 클릭하세요', 3200);
 });
 $('#spotNameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveBtn').click(); });
 
