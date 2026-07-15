@@ -509,7 +509,7 @@ const DELETE_PASSWORD = "1124";
   <div id="sidebarFooter">
     🖱 지도 <b style="color:var(--accent)">더블클릭</b> = 스팟 추가 버튼 노출<br>
     📍 스팟은 <b style="color:var(--accent)">마우스만 올려도</b> 장단점이 바로 보여요<br>
-    📍 스팟 <b style="color:var(--accent)">더블클릭</b> = 경계선·팀원배치·진행방향·차량아이콘 드래그 편집<br>
+    📍 스팟 <b style="color:var(--accent)">클릭</b> = 경계선·팀원배치·진행방향·차량아이콘 드래그 편집 · <b style="color:var(--accent)">더블클릭</b> = 수정창<br>
     🗑 스팟 외 핀/선은 <b style="color:var(--accent)">더블클릭</b>하면 바로 삭제돼요 (스팟 삭제는 수정창의 삭제 버튼)<br>
     ➖ 선은 몸통을 드래그하면 통째로 이동됩니다<br>
     🚨 선긋기에서 <b style="color:var(--accent)">빨강</b> 선택 = 점선 경계선 (적 예상 방향)<br>
@@ -1338,11 +1338,6 @@ function addSpotMarker(spot) {
   m.on('click', (e) => {
     L.DomEvent.stopPropagation(e);
     hideHoverCard();
-    openEditModal(spot);
-  });
-  m.on('dblclick', (e) => {
-    L.DomEvent.stopPropagation(e);
-    hideHoverCard();
     hideDangerPreview();
     hideTeamPosPreview();
     hideAdvancePreview();
@@ -1353,6 +1348,12 @@ function addSpotMarker(spot) {
     } else {
       enterSpotSubEditMode(spot);
     }
+  });
+  m.on('dblclick', (e) => {
+    L.DomEvent.stopPropagation(e);
+    hideHoverCard();
+    exitSpotSubEditMode();
+    openEditModal(spot);
   });
   markers[spot.id] = m;
 }
