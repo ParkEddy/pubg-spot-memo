@@ -416,10 +416,11 @@ const DELETE_PASSWORD = "1124";
   }
   .car-row .cr-del:hover { color:var(--danger); background:rgba(231,76,60,.12); }
   .car-hint-icon {
-    font-size:15px; display:flex; align-items:center; justify-content:center;
+    display:flex; align-items:center; justify-content:center;
     width:100%; height:100%; pointer-events:none;
-    filter:drop-shadow(0 0 2px #000) drop-shadow(0 1px 2px #000);
+    filter:drop-shadow(0 0 3px #000) drop-shadow(0 1px 2px #000);
   }
+  .car-hint-icon svg { width:26px; height:26px; }
 
   #settingsBackdrop {
     position:fixed; inset:0; background:rgba(0,0,0,.6);
@@ -508,7 +509,8 @@ const DELETE_PASSWORD = "1124";
   <div id="sidebarFooter">
     🖱 지도 <b style="color:var(--accent)">더블클릭</b> = 스팟 추가 버튼 노출<br>
     📍 스팟은 <b style="color:var(--accent)">마우스만 올려도</b> 장단점이 바로 보여요<br>
-    🗑 모든 핀/선은 <b style="color:var(--accent)">더블클릭</b>하면 바로 삭제돼요<br>
+    📍 스팟 <b style="color:var(--accent)">더블클릭</b> = 경계선·팀원배치·진행방향·차량아이콘 드래그 편집<br>
+    🗑 스팟 외 핀/선은 <b style="color:var(--accent)">더블클릭</b>하면 바로 삭제돼요 (스팟 삭제는 수정창의 삭제 버튼)<br>
     ➖ 선은 몸통을 드래그하면 통째로 이동됩니다<br>
     🚨 선긋기에서 <b style="color:var(--accent)">빨강</b> 선택 = 점선 경계선 (적 예상 방향)<br>
     ⭕ <b style="color:var(--accent)">서클을 켜야</b> 그 안의 스팟이 보여요 (안 켜면 스팟 숨김)<br>
@@ -715,6 +717,8 @@ let advancePreviewLines = []; // 스팟에 마우스 올렸을 때만 보이는 
 let spotCarTargetId = null; // 차량 아이콘 위치+방향 두 점을 기다리는 중인 스팟 id
 let carFirstPoint = null; // 차량 아이콘 위치(첫 클릭) 임시 저장
 let carPreviewMarkers = []; // 스팟에 마우스 올렸을 때만 보이는 차량 방향 아이콘들 (호버 프리뷰)
+let subEditSpotId = null; // 현재 하위 요소(경계선/팀원배치/진행방향/차량아이콘) 드래그 편집 중인 스팟 id
+let subEditLayers = []; // 편집 모드에서 지도에 떠 있는 드래그 핸들/보조선들
 let draggingLine = null; // { line, origA, origB, startLatLng, redraw } — 선 전체 드래그용 전역 상태
 let pendingLineDrag = null; // 아직 임계값을 넘지 않은 드래그 후보 (단순 클릭과 구분하기 위함)
 const DRAG_THRESHOLD_PX = 5;
@@ -1083,6 +1087,7 @@ async function enterMap(preset) {
   finishEnterMap(preset);
 }
 function finishEnterMap(preset) {
+  exitSpotSubEditMode();
   state.mapKey = preset.key; state.mapLabel = preset.label; state.kmSize = preset.kmSize;
   localStorage.setItem(LAST_MAP_KEY, preset.key);
   $('#currentMapName').textContent = '🗺 ' + preset.label;
@@ -1228,17 +1233,24 @@ function hideAdvancePreview() {
   advancePreviewLines.forEach(l => map.removeLayer(l));
   advancePreviewLines = [];
 }
+const CAR_HINT_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path fill="#ffffff" d="M12 1.5 L17.5 9 L17.5 20.5 C17.5 21.6 16.6 22.5 15.5 22.5 L8.5 22.5 C7.4 22.5 6.5 21.6 6.5 20.5 L6.5 9 Z"/>
+  <rect x="8.3" y="10.5" width="7.4" height="4.2" rx="1" fill="rgba(0,0,0,.28)"/>
+</svg>`;
+function carAngleDeg(ch) {
+  const dx = ch.dir.lng - ch.pos.lng;
+  const dy = -(ch.dir.lat - ch.pos.lat); // 위도 증가 = 화면 위쪽이므로 부호 반전
+  return Math.atan2(dy, dx) * 180 / Math.PI + 90; // SVG 기본 방향(위쪽)을 기준으로 보정
+}
 function showCarPreview(spot) {
   hideCarPreview();
   if (!spot.carHints) return;
   Object.values(spot.carHints).forEach(ch => {
-    const dx = ch.dir.lng - ch.pos.lng;
-    const dy = -(ch.dir.lat - ch.pos.lat); // 위도 증가 = 화면 위쪽이므로 부호 반전
-    const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+    const angleDeg = carAngleDeg(ch);
     const m = L.marker([ch.pos.lat, ch.pos.lng], {
       icon: L.divIcon({
-        className:'', iconSize:[22,22], iconAnchor:[11,11],
-        html:`<div class="car-hint-icon" style="transform:rotate(${angleDeg}deg)">🚗</div>`
+        className:'', iconSize:[30,30], iconAnchor:[15,15],
+        html:`<div class="car-hint-icon" style="transform:rotate(${angleDeg}deg)">${CAR_HINT_SVG}</div>`
       }),
       interactive:false
     }).addTo(map);
@@ -1249,6 +1261,69 @@ function hideCarPreview() {
   carPreviewMarkers.forEach(m => map.removeLayer(m));
   carPreviewMarkers = [];
 }
+
+// ---------- 스팟 하위요소(경계선/팀원배치/진행방향/차량아이콘) 드래그 편집 모드 ----------
+const editHandleIcon = () => L.divIcon({ className:'', html:`<div class="line-handle"></div>`, iconSize:[13,13], iconAnchor:[6,6] });
+function exitSpotSubEditMode() {
+  subEditLayers.forEach(l => map.removeLayer(l));
+  subEditLayers = [];
+  subEditSpotId = null;
+}
+function enterSpotSubEditMode(spot) {
+  exitSpotSubEditMode();
+  subEditSpotId = spot.id;
+
+  Object.values(spot.dangerLines || {}).forEach(dl => {
+    const poly = L.polyline([[dl.a.lat,dl.a.lng],[dl.b.lat,dl.b.lng]], { color: LINE_COLORS.red, weight:2.5, dashArray:'10 8', opacity:.95 }).addTo(map);
+    const h1 = L.marker([dl.a.lat,dl.a.lng], { icon:editHandleIcon(), draggable:true, zIndexOffset:1500 }).addTo(map);
+    const h2 = L.marker([dl.b.lat,dl.b.lng], { icon:editHandleIcon(), draggable:true, zIndexOffset:1500 }).addTo(map);
+    h1.on('drag', () => { const ll=h1.getLatLng(); dl.a={lat:ll.lat,lng:ll.lng}; poly.setLatLngs([[dl.a.lat,dl.a.lng],[dl.b.lat,dl.b.lng]]); });
+    h1.on('dragend', () => writeSpot(spot));
+    h2.on('drag', () => { const ll=h2.getLatLng(); dl.b={lat:ll.lat,lng:ll.lng}; poly.setLatLngs([[dl.a.lat,dl.a.lng],[dl.b.lat,dl.b.lng]]); });
+    h2.on('dragend', () => writeSpot(spot));
+    subEditLayers.push(poly, h1, h2);
+  });
+
+  Object.values(spot.teamPositions || {}).forEach(tp => {
+    const m = L.marker([tp.lat,tp.lng], { icon:makeTeamIcon(tp.slot), draggable:true, zIndexOffset:1500 }).addTo(map);
+    m.on('dragend', () => { const ll=m.getLatLng(); tp.lat=ll.lat; tp.lng=ll.lng; writeSpot(spot); });
+    subEditLayers.push(m);
+  });
+
+  Object.values(spot.advanceLines || {}).forEach(al => {
+    const poly = L.polyline([[al.a.lat,al.a.lng],[al.b.lat,al.b.lng]], { color:'#00e676', weight:3, opacity:.95 }).addTo(map);
+    const h1 = L.marker([al.a.lat,al.a.lng], { icon:editHandleIcon(), draggable:true, zIndexOffset:1500 }).addTo(map);
+    const h2 = L.marker([al.b.lat,al.b.lng], { icon:editHandleIcon(), draggable:true, zIndexOffset:1500 }).addTo(map);
+    h1.on('drag', () => { const ll=h1.getLatLng(); al.a={lat:ll.lat,lng:ll.lng}; poly.setLatLngs([[al.a.lat,al.a.lng],[al.b.lat,al.b.lng]]); });
+    h1.on('dragend', () => writeSpot(spot));
+    h2.on('drag', () => { const ll=h2.getLatLng(); al.b={lat:ll.lat,lng:ll.lng}; poly.setLatLngs([[al.a.lat,al.a.lng],[al.b.lat,al.b.lng]]); });
+    h2.on('dragend', () => writeSpot(spot));
+    subEditLayers.push(poly, h1, h2);
+  });
+
+  Object.values(spot.carHints || {}).forEach(ch => {
+    const line = L.polyline([[ch.pos.lat,ch.pos.lng],[ch.dir.lat,ch.dir.lng]], { color:'#00bcd4', weight:2, dashArray:'4 6', opacity:.8 }).addTo(map);
+    const carIcon = L.marker([ch.pos.lat,ch.pos.lng], {
+      icon: L.divIcon({ className:'', iconSize:[30,30], iconAnchor:[15,15], html:`<div class="car-hint-icon" style="transform:rotate(${carAngleDeg(ch)}deg)">${CAR_HINT_SVG}</div>` }),
+      interactive:false
+    }).addTo(map);
+    const h1 = L.marker([ch.pos.lat,ch.pos.lng], { icon:editHandleIcon(), draggable:true, zIndexOffset:1500 }).addTo(map);
+    const h2 = L.marker([ch.dir.lat,ch.dir.lng], { icon:editHandleIcon(), draggable:true, zIndexOffset:1500 }).addTo(map);
+    const redrawCar = () => {
+      line.setLatLngs([[ch.pos.lat,ch.pos.lng],[ch.dir.lat,ch.dir.lng]]);
+      carIcon.setLatLng([ch.pos.lat,ch.pos.lng]);
+      carIcon.setIcon(L.divIcon({ className:'', iconSize:[30,30], iconAnchor:[15,15], html:`<div class="car-hint-icon" style="transform:rotate(${carAngleDeg(ch)}deg)">${CAR_HINT_SVG}</div>` }));
+    };
+    h1.on('drag', () => { const ll=h1.getLatLng(); ch.pos={lat:ll.lat,lng:ll.lng}; redrawCar(); });
+    h1.on('dragend', () => writeSpot(spot));
+    h2.on('drag', () => { const ll=h2.getLatLng(); ch.dir={lat:ll.lat,lng:ll.lng}; redrawCar(); });
+    h2.on('dragend', () => writeSpot(spot));
+    subEditLayers.push(line, carIcon, h1, h2);
+  });
+
+  toast('🖊 편집 모드: 흰 점을 드래그해서 위치를 조정하세요. 스팟을 다시 더블클릭하면 종료됩니다.', 4500);
+}
+
 function addSpotMarker(spot) {
   const m = L.marker([spot.lat, spot.lng], { icon:makeGradeIcon(spot.grade), riseOnHover:true, draggable:true }).addTo(spotLayer);
   bindHoverCard(m, () => spotTooltipHtml(spot));
@@ -1272,7 +1347,12 @@ function addSpotMarker(spot) {
     hideTeamPosPreview();
     hideAdvancePreview();
     hideCarPreview();
-    if (deleteSpot(spot.id)) toast('🗑 스팟 삭제됨');
+    if (subEditSpotId === spot.id) {
+      exitSpotSubEditMode();
+      toast('편집 모드 종료');
+    } else {
+      enterSpotSubEditMode(spot);
+    }
   });
   markers[spot.id] = m;
 }
@@ -1957,6 +2037,7 @@ function renderCarList(spot) {
   if (!entries.length) wrap.innerHTML = '<div class="hc-empty" style="font-size:11.5px;">등록된 차량 아이콘이 없어요</div>';
 }
 function openAddModal() {
+  exitSpotSubEditMode();
   editingSpotId = null; selectedGrade = 'S';
   $('#modalTitle').textContent = '📍 새 스팟 추가';
   $('#spotNameInput').value = ''; $('#spotProsInput').value = ''; $('#spotConsInput').value = '';
@@ -1970,6 +2051,7 @@ function openAddModal() {
   setTimeout(() => $('#spotNameInput').focus(), 50);
 }
 function openEditModal(spot) {
+  exitSpotSubEditMode();
   editingSpotId = spot.id;
   pendingLatLng = { lat: spot.lat, lng: spot.lng };
   selectedGrade = spot.grade;
@@ -2137,6 +2219,7 @@ $('#clearAllBtn').addEventListener('click', () => {
     ? `[${state.mapLabel}] 맵의 공유 데이터(스팟/차량/선)를 전부 삭제합니다.\n⚠️ 모든 사용자에게서 삭제됩니다! 계속할까요?`
     : `[${state.mapLabel}] 맵의 내 데이터를 전부 삭제할까요?`;
   if (!confirm(msg)) return;
+  exitSpotSubEditMode();
   state.spots = {}; state.vehicles = {}; state.lines = {}; state.team = {}; state.labels = {}; state.secretRooms = {};
   rebuildAllMarkers(); rebuildVehicleMarkers(); rebuildLineLayers(); rebuildTeamMarkers(); rebuildLabelMarkers(); rebuildSecretRoomMarkers();
   if (isShared()) { mapRef.remove(); } else saveSharedData();
